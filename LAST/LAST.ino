@@ -56,7 +56,7 @@ static const int MANUAL_SPEED_STEP_PERCENT               = 10;  // one gear = 10
 static const unsigned long JOYSTICK_GESTURE_DEBOUNCE_MS  = 150;
 
 // ── Walking speed presets ───────────────────────────────────────────────────
-static const int WALK_SPEED_SLOW_PERCENT   = 20;   // slow
+static const int WALK_SPEED_SLOW_PERCENT   = 30;   // slow
 static const int WALK_SPEED_MEDIUM_PERCENT = 60;   // medium
 static const int WALK_SPEED_FAST_PERCENT   = 100;  // fast
 

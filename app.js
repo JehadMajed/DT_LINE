@@ -637,7 +637,7 @@ function parseTelemetry(rawString) {
     try {
         const data = JSON.parse(rawString);
 
-        const rpm = parseFloat(data.rpm) || 0;
+        const rpm = parseFloat(data.estimated_rpm ?? data.rpm) || 0;
         const pwm = parseInt(data.speed_percent) || 0;
         const prox = data.e18_active !== undefined ? !!data.e18_active : !!data.sensor_active;
         const temp = data.temp_c !== undefined && data.temp_c !== null ? parseFloat(data.temp_c) : null;
