@@ -56,7 +56,7 @@ static const int MANUAL_SPEED_STEP_PERCENT               = 10;  // one gear = 10
 static const unsigned long JOYSTICK_GESTURE_DEBOUNCE_MS  = 150;
 
 // ── Walking speed presets ───────────────────────────────────────────────────
-static const int WALK_SPEED_SLOW_PERCENT   = 35;   // slow  (< 40%)
+static const int WALK_SPEED_SLOW_PERCENT   = 20;   // slow
 static const int WALK_SPEED_MEDIUM_PERCENT = 60;   // medium
 static const int WALK_SPEED_FAST_PERCENT   = 100;  // fast
 
@@ -897,6 +897,7 @@ void publishTelemetry() {
 
 
   doc["rpm"]                  = currentRPM;
+  doc["estimated_rpm"]         = currentSpeedPercent * (167.0f / 100.0f);
   doc["e18_active"]           = e18Active;
   doc["uptime_ms"]            = now;
   doc["dir"]                  = directionText();
