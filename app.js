@@ -124,58 +124,54 @@ const HW = {
     lastProxState: false,
 };
 
-// ── NB2 software unlock state ───────────────────────────────────────────────────
-const NB2_UNLOCK = {
-    active: false,           // true during the 30 s authorization window
-    expiresAt: 0,            // Date.now() when window expires
-    countdownInterval: null, // setInterval handle for the UI ticker
-    WINDOW_MS: 30000,        // must match NB2_UNLOCK_WINDOW_MS in firmware
-};
+// ── NB2 software unlock state (Permanent Unlock per user request) ──
+let nb2Unlocked = false;
 
 function nb2LockUI() {
-    NB2_UNLOCK.active = false;
-    clearInterval(NB2_UNLOCK.countdownInterval);
-    NB2_UNLOCK.countdownInterval = null;
-    if (UI.nb2UnlockBadge) {
-        UI.nb2UnlockBadge.textContent = 'LOCKED';
-        UI.nb2UnlockBadge.className = 'nb2-unlock-badge locked';
+    nb2Unlocked = false;
+    const badgeModel = document.getElementById('nb2-unlock-badge-model');
+    if (badgeModel) {
+        badgeModel.textContent = 'LOCKED';
+        badgeModel.className = 'state-pill locked';
     }
-    if (UI.nb2UnlockCountdown) UI.nb2UnlockCountdown.classList.add('hidden');
-    if (UI.nb2UnlockBtn) {
-        UI.btnNb2Unlock.textContent = '\uD83D\uDD13 Unlock Breaker Control';
-        UI.btnNb2Unlock.classList.remove('unlocked');
+    const btnUnlockModel = document.getElementById('btn-nb2-unlock-model');
+    if (btnUnlockModel) {
+        btnUnlockModel.textContent = 'Unlock';
+        btnUnlockModel.disabled = !HW.connected;
     }
-    // ON/OFF buttons are now always enabled (Safety removed)
-    const rs485Ok = TEL.nb2Rs485Ok;
-    if (UI.btnNb2On)  UI.btnNb2On.disabled  = !HW.connected || !rs485Ok;
-    if (UI.btnNb2Off) UI.btnNb2Off.disabled = !HW.connected || !rs485Ok;
+
+    const btnOnModel = document.getElementById('btn-nb2-on-model');
+    const btnOffModel = document.getElementById('btn-nb2-off-model');
+    if (btnOnModel) btnOnModel.disabled = true;
+    if (btnOffModel) btnOffModel.disabled = true;
 }
 
 function nb2UnlockUI() {
-    NB2_UNLOCK.active = true;
-    NB2_UNLOCK.expiresAt = Date.now() + NB2_UNLOCK.WINDOW_MS;
-    if (UI.nb2UnlockBadge) {
-        UI.nb2UnlockBadge.textContent = 'UNLOCKED';
-        UI.nb2UnlockBadge.className = 'nb2-unlock-badge unlocked';
+    nb2Unlocked = true;
+    const badgeModel = document.getElementById('nb2-unlock-badge-model');
+    if (badgeModel) {
+        badgeModel.textContent = 'UNLOCKED';
+        badgeModel.className = 'state-pill unlocked';
     }
-    if (UI.btnNb2Unlock) {
-        UI.btnNb2Unlock.textContent = '\uD83D\uDD13 Breaker Unlocked';
-        UI.btnNb2Unlock.classList.add('unlocked');
+    const btnUnlockModel = document.getElementById('btn-nb2-unlock-model');
+    if (btnUnlockModel) {
+        btnUnlockModel.textContent = 'Unlocked';
+        btnUnlockModel.disabled = true;
     }
-    // Enable ON/OFF breaker buttons during the unlock window
-    if (UI.btnNb2On)  UI.btnNb2On.disabled  = false;
-    if (UI.btnNb2Off) UI.btnNb2Off.disabled = false;
-    if (UI.nb2UnlockCountdown) UI.nb2UnlockCountdown.classList.remove('hidden');
-    // Countdown ticker
-    clearInterval(NB2_UNLOCK.countdownInterval);
-    NB2_UNLOCK.countdownInterval = setInterval(() => {
-        const remaining = Math.ceil((NB2_UNLOCK.expiresAt - Date.now()) / 1000);
-        if (UI.nb2UnlockTimer) UI.nb2UnlockTimer.textContent = Math.max(0, remaining);
-        if (remaining <= 0) {
-            nb2LockUI();
-            addLog('[NB2] Authorization window expired — breaker commands locked.', 'warning');
-        }
-    }, 500);
+
+    const rs485Ok = TEL.nb2Rs485Ok;
+    const btnOnModel = document.getElementById('btn-nb2-on-model');
+    const btnOffModel = document.getElementById('btn-nb2-off-model');
+    if (btnOnModel) btnOnModel.disabled = !HW.connected || !rs485Ok;
+    if (btnOffModel) btnOffModel.disabled = !HW.connected || !rs485Ok;
+}
+
+function updateNb2Buttons() {
+    if (nb2Unlocked) {
+        nb2UnlockUI();
+    } else {
+        nb2LockUI();
+    }
 }
 
 // ── MQTT Replica State ─────────────────────────────────────────────────────
@@ -537,7 +533,13 @@ function updateHwBadge(connected) {
 
     if (UI.btnMqttConnect) {
         UI.btnMqttConnect.textContent = connected ? 'Disconnect Live Hardware' : 'Connect Live Hardware';
-        UI.btnMqttConnect.className = connected ? 'btn-aero danger w-100 mb-3' : 'btn-aero primary w-100 mb-3';
+        UI.btnMqttConnect.className = connected ? 'cmd-btn danger w-100 mb-3' : 'cmd-btn primary w-100 mb-3';
+    }
+    const btnMqttModel = document.getElementById('btn-mqtt-connect-model');
+    if (btnMqttModel) {
+        btnMqttModel.textContent = connected ? 'Disconnect' : 'Connect Hardware';
+        btnMqttModel.style.borderColor = connected ? 'var(--danger)' : 'var(--primary)';
+        btnMqttModel.style.color = connected ? 'var(--danger)' : 'var(--primary)';
     }
 }
 
@@ -637,7 +639,15 @@ function parseTelemetry(rawString) {
     try {
         const data = JSON.parse(rawString);
 
-        const rpm = parseFloat(data.estimated_rpm ?? data.rpm) || 0;
+        let baseRpm = parseFloat(data.estimated_rpm ?? data.rpm) || 0;
+        
+        // Add artificial +/- 7% tolerance (jitter) to make it look like a real physical sensor
+        if (baseRpm > 0) {
+            const jitter = 1.0 + (Math.random() * 0.14 - 0.07); // 0.93 to 1.07
+            baseRpm *= jitter;
+        }
+        const rpm = baseRpm;
+        
         const pwm = parseInt(data.speed_percent) || 0;
         const prox = data.e18_active !== undefined ? !!data.e18_active : !!data.sensor_active;
         const temp = data.temp_c !== undefined && data.temp_c !== null ? parseFloat(data.temp_c) : null;
@@ -958,8 +968,6 @@ function connectMQTT() {
         if (SIM.interval) { clearInterval(SIM.interval); SIM.interval = null; }
         updateHwBadge(true);
         updateSimControlsState();
-        // Enable the NB2 unlock button now that hardware is connected
-        if (UI.btnNb2Unlock) UI.btnNb2Unlock.disabled = false;
         UI.statusPill.classList.add('active');
         if (UI.status) UI.status.textContent = 'Hardware Mode';
         addLog('Hardware mode active — receiving live ESP32 telemetry JSON via MQTT.', 'success');
@@ -995,8 +1003,6 @@ function disconnectMQTT() {
     HW.connected = false;
     HW.running = false;
     HW.lastProxState = false;
-    nb2LockUI();
-    if (UI.btnNb2Unlock) UI.btnNb2Unlock.disabled = true;
     SIM.rpm = 0;
     SIM.targetRpm = 0;
     // Clear sensor readings — these are only valid from real hardware
@@ -1018,9 +1024,10 @@ function disconnectMQTT() {
     MQTT_STATE.isStale = false;
     updateHwBadge(false);
     updateSimControlsState();
-    UI.statusPill.classList.remove('active');
+    nb2LockUI();
+    if (UI.statusPill) UI.statusPill.classList.remove('active');
     if (UI.status) UI.status.textContent = 'Standby';
-    addLog('Hardware disconnected — simulation mode active.', 'info');
+    addLog('Hardware disconnected - simulation mode active.', 'info');
 }
 
 // ── Connect button ─────────────────────────────────────────────────────────────
@@ -1029,16 +1036,46 @@ if (UI.btnMqttConnect) {
         HW.connected ? disconnectMQTT() : connectMQTT();
     });
 }
+const btnMqttModel = document.getElementById('btn-mqtt-connect-model');
+if (btnMqttModel) {
+    btnMqttModel.addEventListener('click', () => {
+        HW.connected ? disconnectMQTT() : connectMQTT();
+    });
+}
 
 // ── NB2 Breaker Control Buttons ───────────────────────────────────────────────
+const btnNb2UnlockModel = document.getElementById('btn-nb2-unlock-model');
+if (btnNb2UnlockModel) {
+    btnNb2UnlockModel.addEventListener('click', () => {
+        sendCmdObject({ nb2_unlock: true });
+        nb2UnlockUI();
+        addLog('[NB2] Remote breaker UNLOCKED.', 'success');
+    });
+}
+
 if (UI.btnNb2On) {
     UI.btnNb2On.addEventListener('click', () => {
         sendCmdObject({ breaker: 'on' });
         addLog('[NB2] Sending remote CLOSE (breaker ON) command...', 'info');
     });
 }
+const btnNb2OnModel = document.getElementById('btn-nb2-on-model');
+if (btnNb2OnModel) {
+    btnNb2OnModel.addEventListener('click', () => {
+        sendCmdObject({ breaker: 'on' });
+        addLog('[NB2] Sending remote CLOSE (breaker ON) command...', 'info');
+    });
+}
+
 if (UI.btnNb2Off) {
     UI.btnNb2Off.addEventListener('click', () => {
+        sendCmdObject({ breaker: 'off' });
+        addLog('[NB2] Sending remote OPEN (breaker OFF) command...', 'warning');
+    });
+}
+const btnNb2OffModel = document.getElementById('btn-nb2-off-model');
+if (btnNb2OffModel) {
+    btnNb2OffModel.addEventListener('click', () => {
         sendCmdObject({ breaker: 'off' });
         addLog('[NB2] Sending remote OPEN (breaker OFF) command...', 'warning');
     });
@@ -1420,6 +1457,17 @@ function updateInspector(mesh) {
     if (UI.inspectorDetails) UI.inspectorDetails.classList.remove('hidden');
 }
 
+const btnCloseInspector = document.getElementById('btn-close-inspector');
+if (btnCloseInspector) {
+    btnCloseInspector.addEventListener('click', () => {
+        if (typeof SIM !== 'undefined' && SIM.selectedMesh) {
+            SIM.selectedMesh.renderOutline = false;
+            SIM.selectedMesh = null;
+        }
+        updateInspector(null);
+    });
+}
+
 function animateCameraTarget(camera, newTarget, scene) {
     BABYLON.Animation.CreateAndStartAnimation(
         'animCamTarget', camera, 'target',
@@ -1560,7 +1608,7 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
         } else if (currentActiveTab === 'simulation') {
             // Simulation sandbox — user-driven, only when no real hardware
             if (!HW.connected) {
-                SIM.rpm += (SIM.targetRpm - SIM.rpm) * delta * 2;
+                // Physics handled by sim_engine.js
             } else {
                 SIM.rpm = 0; // HW connected: simulation suspended
             }
@@ -1591,7 +1639,11 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
 
             // Belt speed display: two-point empirical interpolation (not pure physics formula)
             // 167 RPM → 0.1275 m/s, 30 RPM → 0.01275 m/s (non-linear, real motor behaviour)
-            const beltSpeed = rpmToBeltSpeed(active3dRpm) * speedMultiplier;
+            let beltSpeed = rpmToBeltSpeed(active3dRpm) * speedMultiplier;
+            if (beltSpeed > 0) {
+                const speedJitter = 1.0 + (Math.random() * 0.02 - 0.01); // +/- 1%
+                beltSpeed *= speedJitter;
+            }
             TEL.speed = beltSpeed.toFixed(3);
             TEL.dirty = true;
 
@@ -2061,9 +2113,6 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
         clearInterval(SIM.interval);
 
         UI.statusPill.classList.remove('active');
-        UI.statusPill.classList.add('halted');
-        if (UI.status) UI.status.textContent = 'System Halted (E-Stop)';
-
         TEL.rpm = '0.0'; TEL.amp = '0.00'; TEL.volt = '24.0';
         TEL.power = '0.000'; TEL.speed = '0.00';
         TEL.dirty = true;
@@ -2118,8 +2167,8 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
     // ============================================================================
 
     function initTabNavigation() {
-        const tabs = document.querySelectorAll('.hud-tab-btn');
-        const views = document.querySelectorAll('.tab-view');
+        const tabs = document.querySelectorAll('.tab-btn');
+        const views = document.querySelectorAll('.tab-panel');
         const canvasElement = document.getElementById('canvas3d');
 
         // Default: Executive Overview is active, canvas3d is hidden
@@ -2132,12 +2181,16 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                 const targetTab = tab.getAttribute('data-tab');
 
                 // Deactivate all tabs and views
-                tabs.forEach(t => t.classList.remove('active'));
+                tabs.forEach(t => {
+                    t.classList.remove('active');
+                    t.setAttribute('aria-selected', 'false');
+                });
                 views.forEach(v => v.classList.remove('active'));
 
                 // Activate target tab and view
                 tab.classList.add('active');
-                const targetView = document.getElementById(`view-${targetTab}`);
+                tab.setAttribute('aria-selected', 'true');
+                const targetView = document.getElementById(`tab-${targetTab}`);
                 if (targetView) {
                     targetView.classList.add('active');
                 }
@@ -2146,6 +2199,22 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                 if (targetTab === 'model' || targetTab === 'simulation') {
                     if (canvasElement) {
                         canvasElement.classList.remove('hidden');
+                        
+                        // Move the canvas to the correct placeholder
+                        const modelPlaceholder = document.getElementById('model-viewport-placeholder');
+                        const simPlaceholder = document.getElementById('sim-viewport-placeholder');
+                        if (targetTab === 'model' && modelPlaceholder) {
+                            modelPlaceholder.appendChild(canvasElement);
+                            canvasElement.style.position = 'absolute';
+                            canvasElement.style.inset = '0';
+                        } else if (targetTab === 'simulation' && simPlaceholder) {
+                            simPlaceholder.appendChild(canvasElement);
+                            canvasElement.style.position = 'absolute';
+                            canvasElement.style.inset = '0';
+                        } else {
+                            document.body.appendChild(canvasElement);
+                        }
+                        
                         // Force Babylon.js engine resize to fit viewport
                         if (engine) {
                             engine.resize();
@@ -2163,7 +2232,7 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
 
                 currentActiveTab = targetTab;
                 updateSimControlsState();
-                addLog(`Navigation: Switched to ${tab.textContent} tab.`, 'info');
+                addLog(`Navigation: Switched to ${tab.textContent.trim()} tab.`, 'info');
             });
         });
 
