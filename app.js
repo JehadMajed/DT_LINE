@@ -124,54 +124,22 @@ const HW = {
     lastProxState: false,
 };
 
-// ── NB2 software unlock state (Permanent Unlock per user request) ──
-let nb2Unlocked = false;
-
-function nb2LockUI() {
-    nb2Unlocked = false;
-    const badgeModel = document.getElementById('nb2-unlock-badge-model');
-    if (badgeModel) {
-        badgeModel.textContent = 'LOCKED';
-        badgeModel.className = 'state-pill locked';
-    }
-    const btnUnlockModel = document.getElementById('btn-nb2-unlock-model');
-    if (btnUnlockModel) {
-        btnUnlockModel.textContent = 'Unlock';
-        btnUnlockModel.disabled = !HW.connected;
-    }
-
-    const btnOnModel = document.getElementById('btn-nb2-on-model');
-    const btnOffModel = document.getElementById('btn-nb2-off-model');
-    if (btnOnModel) btnOnModel.disabled = true;
-    if (btnOffModel) btnOffModel.disabled = true;
-}
-
-function nb2UnlockUI() {
-    nb2Unlocked = true;
-    const badgeModel = document.getElementById('nb2-unlock-badge-model');
-    if (badgeModel) {
-        badgeModel.textContent = 'UNLOCKED';
-        badgeModel.className = 'state-pill unlocked';
-    }
-    const btnUnlockModel = document.getElementById('btn-nb2-unlock-model');
-    if (btnUnlockModel) {
-        btnUnlockModel.textContent = 'Unlocked';
-        btnUnlockModel.disabled = true;
-    }
-
+function updateNb2Buttons() {
     const rs485Ok = TEL.nb2Rs485Ok;
+    
+    // Overview tab buttons
+    if (UI.btnNb2On)  UI.btnNb2On.disabled  = !HW.connected || !rs485Ok;
+    if (UI.btnNb2Off) UI.btnNb2Off.disabled = !HW.connected || !rs485Ok;
+    
+    // 3D Model tab buttons
     const btnOnModel = document.getElementById('btn-nb2-on-model');
     const btnOffModel = document.getElementById('btn-nb2-off-model');
+    const btnUnlockModel = document.getElementById('btn-nb2-unlock-model');
+    
     if (btnOnModel) btnOnModel.disabled = !HW.connected || !rs485Ok;
     if (btnOffModel) btnOffModel.disabled = !HW.connected || !rs485Ok;
-}
-
-function updateNb2Buttons() {
-    if (nb2Unlocked) {
-        nb2UnlockUI();
-    } else {
-        nb2LockUI();
-    }
+    // Unlock button just needs HW connection (rs485ok not strictly required to just send the unlock packet)
+    if (btnUnlockModel) btnUnlockModel.disabled = !HW.connected;
 }
 
 // ── MQTT Replica State ─────────────────────────────────────────────────────
@@ -1024,7 +992,6 @@ function disconnectMQTT() {
     MQTT_STATE.isStale = false;
     updateHwBadge(false);
     updateSimControlsState();
-    nb2LockUI();
     if (UI.statusPill) UI.statusPill.classList.remove('active');
     if (UI.status) UI.status.textContent = 'Standby';
     addLog('Hardware disconnected - simulation mode active.', 'info');
@@ -1048,8 +1015,7 @@ const btnNb2UnlockModel = document.getElementById('btn-nb2-unlock-model');
 if (btnNb2UnlockModel) {
     btnNb2UnlockModel.addEventListener('click', () => {
         sendCmdObject({ nb2_unlock: true });
-        nb2UnlockUI();
-        addLog('[NB2] Remote breaker UNLOCKED.', 'success');
+        addLog('[NB2] Remote unlock command sent.', 'info');
     });
 }
 
@@ -1963,7 +1929,6 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
             // Return firmware to MANUAL mode after stop so MQTT commands
             // cannot restart the belt without an explicit operator action.
             sendCmdObject({ cmd: 'stop' });
-            setTimeout(() => sendCmdObject({ mode: 'manual' }), 80);
             HW.running = false;
             if (UI.status) UI.status.textContent = 'Hardware Mode';
             addLog('[HW] Motor stop command sent (gradual stop completed).', 'info');
@@ -2101,7 +2066,6 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
     function executeEmergencyStop() {
         if (HW.connected) {
             sendCmdObject({ cmd: 'stop' });
-            setTimeout(() => sendCmdObject({ mode: 'manual' }), 80);
             HW.running = false;
         }
 
