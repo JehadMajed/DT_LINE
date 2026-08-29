@@ -2003,6 +2003,13 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
     let walkSettleTimer = null;
     let activeWalkPreset = null;
 
+    // Send a heartbeat every 1.5s to keep the ESP32 watchdog from force-stopping the motor
+    setInterval(() => {
+        if (HW.connected && SIM.isRunning) {
+            sendCmdObject({ mode: 'remote' });
+        }
+    }, 1500);
+
     function activateWalkPreset(preset) {
         if (!HW.connected) return;
 
