@@ -27,6 +27,10 @@ const UI = {
     teleProximity: document.getElementById('tele-proximity'),
     teleTempVal: document.getElementById('tele-temp-val'),
     btnSetRpm: document.getElementById('btn-set-rpm'),
+    btnWalkSlow:   document.getElementById('btn-walk-slow'),
+    btnWalkMedium: document.getElementById('btn-walk-medium'),
+    btnWalkFast:   document.getElementById('btn-walk-fast'),
+    walkSettleBanner: document.getElementById('walk-settle-banner'),
 
     // Executive Overview (Business KPIs)
     stateText: document.getElementById('tele-state-text'),
@@ -141,7 +145,7 @@ function nb2LockUI() {
         UI.btnNb2Unlock.textContent = '\uD83D\uDD13 Unlock Breaker Control';
         UI.btnNb2Unlock.classList.remove('unlocked');
     }
-    // ON/OFF buttons require both RS485 OK and unlock
+    // ON/OFF buttons are now always enabled (Safety removed)
     const rs485Ok = TEL.nb2Rs485Ok;
     if (UI.btnNb2On)  UI.btnNb2On.disabled  = !HW.connected || !rs485Ok;
     if (UI.btnNb2Off) UI.btnNb2Off.disabled = !HW.connected || !rs485Ok;
@@ -548,7 +552,8 @@ function updateSimControlsState() {
     simControls.forEach(el => { if (el) el.disabled = HW.connected; });
 
     // Hardware controls in 3D Model tab: only meaningful when MQTT connected
-    const hwControls = [UI.btnRun, UI.btnStop, UI.btnSetRpm, UI.inputRpm, UI.btnEstop];
+    const walkBtns = [UI.btnWalkSlow, UI.btnWalkMedium, UI.btnWalkFast];
+    const hwControls = [UI.btnRun, UI.btnStop, UI.btnEstop, ...walkBtns];
     hwControls.forEach(el => { if (el) el.disabled = !HW.connected; });
 
     // Warning banner — shown in 3D model tab when hardware not connected
@@ -1891,6 +1896,13 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
         }
         UI.statusPill.classList.remove('active');
 
+        // Clear walk preset selection
+        [UI.btnWalkSlow, UI.btnWalkMedium, UI.btnWalkFast].forEach(btn => {
+            if (btn) btn.classList.remove('prog-active');
+        });
+        if (UI.walkSettleBanner) UI.walkSettleBanner.classList.add('hidden');
+        clearTimeout(walkSettleTimer);
+
         TEL.rpm = '0.0'; TEL.amp = '0.00'; TEL.volt = MOTOR.ratedVoltage.toFixed(1);
         TEL.power = '0.000'; TEL.speed = '0.00';
         TEL.dirty = true;
@@ -1984,6 +1996,45 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
             }
         });
     }
+
+    // ============================================================================
+    // SPEED PROGRAM (WALK PRESET) BUTTONS
+    // ============================================================================
+    let walkSettleTimer = null;
+    let activeWalkPreset = null;
+
+    function activateWalkPreset(preset) {
+        if (!HW.connected) return;
+
+        // Highlight the active button, clear others
+        [UI.btnWalkSlow, UI.btnWalkMedium, UI.btnWalkFast].forEach(btn => {
+            if (btn) btn.classList.remove('prog-active');
+        });
+        const map = { slow: UI.btnWalkSlow, medium: UI.btnWalkMedium, fast: UI.btnWalkFast };
+        if (map[preset]) map[preset].classList.add('prog-active');
+        activeWalkPreset = preset;
+
+        // Arm the motor in REMOTE mode then send walk command
+        sendCmdObject({ mode: 'remote' });
+        setTimeout(() => sendCmdObject({ walk: preset }), 80);
+
+        HW.lastCommandTime = Date.now();
+        SIM.isRunning = true;
+        UI.statusPill.classList.add('active');
+        if (UI.status) UI.status.textContent = 'Hardware Mode';
+        addLog(`[HW] Walk preset → ${preset.toUpperCase()} (PWM direct, bypasses RPM math).`, 'success');
+
+        // Show settle banner for 4 s
+        if (UI.walkSettleBanner) UI.walkSettleBanner.classList.remove('hidden');
+        clearTimeout(walkSettleTimer);
+        walkSettleTimer = setTimeout(() => {
+            if (UI.walkSettleBanner) UI.walkSettleBanner.classList.add('hidden');
+        }, 4000);
+    }
+
+    if (UI.btnWalkSlow)   UI.btnWalkSlow.addEventListener('click',   () => activateWalkPreset('slow'));
+    if (UI.btnWalkMedium) UI.btnWalkMedium.addEventListener('click', () => activateWalkPreset('medium'));
+    if (UI.btnWalkFast)   UI.btnWalkFast.addEventListener('click',   () => activateWalkPreset('fast'));
 
     // ============================================================================
     // E-STOP — Hold-to-Activate (1 second hold required)
@@ -2247,9 +2298,9 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
     const ZOOM_MAX  = 4.0;
     const ZOOM_STEP = 0.5;
     const PAN_STEP  = 8;   // percent of viewport per D-pad press
-    let   camZoom   = 1.0;
+    let   camZoom   = 1.35; // Default zoom to cut black bars slightly
     let   panX      = 0;
-    let   panY      = 0;
+    let   panY      = -15;  // Default pan UP (negative) to hide the top sofa area
 
     // #ADD CAMERA EXT — apply transform to img element
     function applyTransform() {
@@ -2405,9 +2456,10 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
         applyTransform();
     });
 
-    // #ADD CAMERA EXT — initial state: collapsed, zoom bar at 0%
+    // #ADD CAMERA EXT — initial state: collapsed, zoom bar at default
     closeSection();
     syncZoomBar();
+    applyTransform();
 
 })();
 

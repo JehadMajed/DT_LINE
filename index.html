@@ -190,14 +190,27 @@
                         ⚠ Hardware not connected. Connect live hardware via MQTT to use controls.
                     </div>
                     <div class="panel-section">
-                        <h3 class="section-title">System Commands (Real Hardware)</h3>
-                        <div class="command-group">
-                            <label class="metric-label" for="input-rpm">Target RPM Setpoint</label>
-                            <div class="input-wrapper">
-                                <input type="number" id="input-rpm" class="aero-input" min="0" max="167" value="120"
-                                    step="1">
-                                <button id="btn-set-rpm" class="btn-aero outline">Set</button>
-                            </div>
+                        <h3 class="section-title">Speed Program</h3>
+                        <p class="metric-label" style="margin-bottom: 0.75rem; font-size:0.7rem;">Select a preset — sends direct PWM command to hardware.</p>
+                        <div class="speed-program-grid" id="speed-program-grid">
+                            <button id="btn-walk-slow" class="speed-prog-btn" data-walk="slow" disabled>
+                                <span class="prog-icon">🐢</span>
+                                <span class="prog-name">Slow</span>
+                                <span class="prog-sub">35% PWM</span>
+                            </button>
+                            <button id="btn-walk-medium" class="speed-prog-btn" data-walk="medium" disabled>
+                                <span class="prog-icon">⚙️</span>
+                                <span class="prog-name">Medium</span>
+                                <span class="prog-sub">60% PWM</span>
+                            </button>
+                            <button id="btn-walk-fast" class="speed-prog-btn" data-walk="fast" disabled>
+                                <span class="prog-icon">⚡</span>
+                                <span class="prog-name">Fast</span>
+                                <span class="prog-sub">100% PWM</span>
+                            </button>
+                        </div>
+                        <div id="walk-settle-banner" class="walk-settle-banner hidden">
+                            <span class="settle-dot"></span> Settling… (up to 10 s for full stabilization)
                         </div>
                         <div class="action-buttons mt-3">
                             <button id="btn-run" class="btn-aero primary">Engage System</button>

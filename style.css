@@ -1725,3 +1725,132 @@ select:disabled {
     from { opacity: 0; transform: translateY(-4px); }
     to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ==========================================================================
+   SPEED PROGRAM SELECTOR (3D Model Tab)
+   ========================================================================== */
+.speed-program-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.speed-prog-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    padding: 0.7rem 0.3rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    background: var(--surface-inset);
+    color: var(--text-label);
+    cursor: pointer;
+    transition: all 0.18s ease;
+    font-family: var(--font-ui);
+    position: relative;
+    overflow: hidden;
+}
+
+.speed-prog-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, transparent 60%, rgba(255,255,255,0.04));
+    pointer-events: none;
+}
+
+.speed-prog-btn:not(:disabled):hover {
+    border-color: var(--accent-muted);
+    background: var(--accent-subtle);
+    color: var(--text-primary);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(2, 132, 199, 0.18);
+}
+
+.speed-prog-btn:not(:disabled):active {
+    transform: translateY(0);
+}
+
+.speed-prog-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Active / selected program */
+.speed-prog-btn.prog-active {
+    border-color: var(--accent);
+    background: var(--accent-subtle);
+    color: var(--text-primary);
+    box-shadow: 0 0 0 2px var(--accent-muted), 0 4px 16px rgba(2, 132, 199, 0.25);
+}
+
+/* Slow = green tint when active */
+#btn-walk-slow.prog-active {
+    border-color: var(--status-ok);
+    background: var(--status-ok-bg);
+    box-shadow: 0 0 0 2px var(--status-ok-border), 0 4px 16px rgba(34, 197, 94, 0.18);
+}
+
+/* Medium = accent blue (default above) */
+
+/* Fast = amber tint when active */
+#btn-walk-fast.prog-active {
+    border-color: var(--status-warn);
+    background: var(--status-warn-bg);
+    box-shadow: 0 0 0 2px var(--status-warn-border), 0 4px 16px rgba(245, 158, 11, 0.18);
+}
+
+.prog-icon {
+    font-size: 1.3rem;
+    line-height: 1;
+}
+
+.prog-name {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+}
+
+.prog-sub {
+    font-size: 0.6rem;
+    font-family: var(--font-mono);
+    color: var(--text-label);
+    opacity: 0.85;
+}
+
+/* Settle banner */
+.walk-settle-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.68rem;
+    font-family: var(--font-mono);
+    color: var(--status-warn);
+    background: var(--status-warn-bg);
+    border: 1px solid var(--status-warn-border);
+    border-radius: var(--radius-sm);
+    padding: 0.35rem 0.6rem;
+    margin-bottom: 0.4rem;
+    transition: opacity 0.3s ease;
+}
+
+.walk-settle-banner.hidden {
+    display: none;
+}
+
+.settle-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--status-warn);
+    flex-shrink: 0;
+    animation: settle-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes settle-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.35; transform: scale(0.65); }
+}
