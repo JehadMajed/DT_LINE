@@ -1,0 +1,118 @@
+===============================================================================
+ NB2 CHINT BREAKER — RS485 WIRING DIAGRAM
+ CHINT NB2 Smart MCB ↔ MAX485 Module ↔ ESP32 WROOM-32
+===============================================================================
+
+RS485 CIRCUIT (NB2 CHINT Breaker Communication)
+================================================
+
+┌──────────────────┐         ┌─────────────────────┐         ┌──────────────────┐
+│   ESP32 WROOM-32 │         │   MAX485 / TTL-RS485 │         │  CHINT NB2       │
+│                  │         │   Converter Module   │         │  Smart Breaker   │
+│                  │         │                      │         │                  │
+│  GPIO 26 (TX) ───┼── TX ──▶│  DI  (Data In)       │         │                  │
+│  GPIO 27 (RX) ───┼── RX ◀──│  RO  (Receiver Out)  │         │                  │
+│  GPIO 23 (EN) ───┼── EN ──▶│  DE + RE (tied)      │         │                  │
+│  3.3V       ─────┼────────▶│  VCC                 │         │                  │
+│  GND        ─────┼────────▶│  GND                 │         │                  │
+│                  │         │                      │         │                  │
+│                  │         │  A (D+) ─────────────┼────────▶│  RS485 A+ (Pin 3)│
+│                  │         │  B (D-) ─────────────┼────────▶│  RS485 B- (Pin 4)│
+└──────────────────┘         └─────────────────────┘         └──────────────────┘
+
+
+WIRING LIST:
+============
+{ESP32 WROOM-32 : GPIO 26 > DI in (MAX485 Module)}
+{ESP32 WROOM-32 : GPIO 27 < RO in (MAX485 Module)}
+{ESP32 WROOM-32 : GPIO 23 > DE+RE in (MAX485 Module)}   ← DE and RE pins tied together
+{ESP32 WROOM-32 : 3.3V > VCC in (MAX485 Module)}
+{ESP32 WROOM-32 : GND > GND in (MAX485 Module)}
+{MAX485 Module : A (D+) > RS485 A+ in (CHINT NB2 Breaker)}
+{MAX485 Module : B (D-) > RS485 B- in (CHINT NB2 Breaker)}
+
+
+NB2 RS485 PORT LOCATION:
+=========================
+The NB2 smart breaker has an RS485 communication port on the bottom or side.
+Look for pins labeled:
+  - Pin 3: RS485 A+ (Data+)
+  - Pin 4: RS485 B- (Data-)
+  - Pin 1/2: May be power or other functions (check your model)
+
+
+COMMUNICATION SETTINGS:
+========================
+  Protocol:     Modbus-RTU
+  Baud Rate:    19200 (default, configurable at register 0x0101)
+  Data Bits:    8
+  Parity:       Even (default, configurable at register 0x0102)
+  Stop Bits:    1
+  Slave Addr:   3 (default, configurable at register 0x0100)
+
+
+IMPORTANT NOTES:
+================
+⚠ The NB2 breaker handles AC MAINS VOLTAGE (220V/380V).
+  - NEVER touch breaker terminals while energized
+  - RS485 A/B wires are low-voltage and isolated from mains
+  - Use shielded twisted-pair cable for RS485 (recommended max: 1200m)
+  - Add 120Ω termination resistor between A and B at end of long cable runs (>10m)
+  - Keep RS485 cable away from power cables to avoid interference
+
+⚡ MAX485 Module Notes:
+  - DE (Driver Enable) and RE (Receiver Enable) are tied together
+  - When EN=HIGH → Transmit mode (ESP sends data to NB2)
+  - When EN=LOW  → Receive mode (ESP receives data from NB2)
+  - The firmware handles this automatically via rs485PreTransmission/rs485PostTransmission
+
+🔌 Power:
+  - MAX485 module runs on 3.3V from ESP32
+  - Some MAX485 modules have 5V logic — use 3.3V compatible version!
+  - The NB2 breaker powers its RS485 interface internally from the mains
+
+
+COMPLETE SYSTEM WIRING SUMMARY:
+================================
+--- Power Adapter 12V ---
+Red  > Proximity NPN NO sensor, B+ (BTS7960)
+GND  > ESP32, Proximity NPN NO, B- (BTS7960)
+
+--- Motor Driver (BTS7960) ---
+{BTS7960 : M+ > Motor+ in (JGB37-555)}
+{BTS7960 : M- > Motor- in (JGB37-555)}
+{ESP32 : 3V3 > VCC in (BTS7960)}
+{ESP32 : GND > GND in (BTS7960)}
+{ESP32 : 3V3 > R_EN in (BTS7960)}
+{ESP32 : 3V3 > L_EN in (BTS7960)}
+{ESP32 : D18 > RPWM in (BTS7960)}
+{ESP32 : D19 > LPWM in (BTS7960)}
+
+--- Encoder ---
+{ESP32 : 3V3 > VCC (blue) in (Encoder)}
+{ESP32 : GND > GND (green) in (Encoder)}
+{Encoder : Phase A (yellow) > D34 in (ESP32)}
+{Encoder : Phase B (white) > D35 in (ESP32)}
+
+--- Proximity (E18/E3F) via Optocoupler ---
+{12V : Brown > VCC in (E3F-DS30C4)}
+{GND : Blue > GND in (E3F-DS30C4)}
+{E3F-DS30C4 : Black > G1 in (PC817)}
+{PC817 : V1 > D4 in (ESP32)}
+{ESP32 : 3V3 > VCC (out side) in (PC817)}
+{ESP32 : GND > GND (out side) in (PC817)}
+
+--- DS18B20 Temperature ---
+{ESP32 : 3V3 > VCC (brown) in (DS18B20)}
+{ESP32 : GND > GND in (DS18B20)}
+{DS18B20 : Data > GPIO 16 in (ESP32)}
+{10K Resistor : between Data and 3.3V (pullup)}
+
+--- RS485 / NB2 Breaker (NEW) ---
+{ESP32 : GPIO 26 > DI in (MAX485)}
+{ESP32 : GPIO 27 < RO in (MAX485)}
+{ESP32 : GPIO 23 > DE+RE in (MAX485)}
+{ESP32 : 3.3V > VCC in (MAX485)}
+{ESP32 : GND > GND in (MAX485)}
+{MAX485 : A > RS485 A+ in (CHINT NB2)}
+{MAX485 : B > RS485 B- in (CHINT NB2)}

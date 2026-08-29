@@ -1,0 +1,4 @@
+ssh jehadroot@rpi5.local
+
+jeahdroot
+root

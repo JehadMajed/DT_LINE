@@ -1,0 +1,171 @@
+// ============================================================================
+// SYSTEM CORE: BABYLON.JS DIGITAL TWIN ENGINE (INDUSTRIAL GRADE)
+// ============================================================================
+
+const UI = {
+    rpm: document.getElementById('tele-rpm'),
+    amp: document.getElementById('tele-amp'),
+    volt: document.getElementById('tele-volt'),
+    status: document.getElementById('connection-status'),
+    statusPill: document.querySelector('.system-status'),
+    logBox: document.getElementById('system-log'),
+    fps: document.getElementById('fps-counter'),
+    btnRun: document.getElementById('btn-run'),
+    btnStop: document.getElementById('btn-stop'),
+    loader: document.getElementById('loading-screen')
+};
+
+const SIM = {
+    isRunning: false, rpm: 0, targetRpm: 0, maxRpm: 150, current: 0, voltage: 24.0, interval: null
+};
+
+function addLog(msg, type = 'info') {
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    const div = document.createElement('div');
+    div.className = `log-entry ${type}`;
+    div.innerHTML = `<span class="timestamp">[${time}]</span> ${msg}`;
+    UI.logBox.appendChild(div);
+    UI.logBox.scrollTop = UI.logBox.scrollHeight;
+}
+
+const canvas = document.getElementById('canvas3d');
+const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true, antialias: true });
+
+const createScene = async function () {
+    const scene = new BABYLON.Scene(engine);
+    scene.clearColor = new BABYLON.Color4(0.06, 0.07, 0.07, 1.0);
+
+    const camera = new BABYLON.ArcRotateCamera("Camera", -Math.PI / 2, Math.PI / 2.5, 4, BABYLON.Vector3.Zero(), scene);
+    camera.attachControl(canvas, true);
+    camera.wheelPrecision = 50; camera.minZ = 0.1;
+
+    const envTexture = BABYLON.CubeTexture.CreateFromPrefilteredData("https://playground.babylonjs.com/textures/environment.dds", scene);
+    scene.environmentTexture = envTexture;
+    
+    const dirLight = new BABYLON.DirectionalLight("dirLight", new BABYLON.Vector3(-1, -2, -1), scene);
+    dirLight.intensity = 1.0;
+
+    let kinematics = { pulleys: [], belts: [] };
+
+    addLog('Loading GLB Asset via Babylon.js...');
+    const result = await BABYLON.SceneLoader.ImportMeshAsync("", "assets/", "Conveyor_Twin_v1.glb", scene);
+    
+    const rootNode = result.meshes[0];
+    rootNode.position = BABYLON.Vector3.Zero();
+    camera.setTarget(rootNode); 
+
+    result.meshes.forEach(mesh => {
+        // إخفاء آمن للقطع المكررة بدون تدمير الذاكرة لتجنب أي أخطاء
+        if (mesh.name !== "Main_Belt" && (mesh.name.toLowerCase().includes("belt") || mesh.name.toLowerCase().includes("baked"))) {
+            mesh.isVisible = false; 
+            return; 
+        }
+
+        if (mesh.name.includes("Roller") || mesh.name.includes("Pulley") || mesh.name.includes("Shaft")) {
+            kinematics.pulleys.push(mesh);
+            if (mesh.material && mesh.material.getClassName() === "PBRMaterial") {
+                mesh.material.metallic = 0.8;
+                mesh.material.roughness = 0.4;
+                
+                const dynamicTexture = new BABYLON.DynamicTexture("rollerTex", 256, scene, true);
+                const ctx = dynamicTexture.getContext();
+                ctx.fillStyle = '#888888ff'; ctx.fillRect(0,0,256,256);
+                ctx.fillStyle = '#000000'; ctx.fillRect(0,0,256,32);
+                dynamicTexture.update();
+                mesh.material.albedoTexture = dynamicTexture;
+            }
+        }
+
+        if (mesh.name === "Main_Belt") {
+            // الحل السحري لمشكلة الوميض (الاختفاء والظهور): إجبار المحرك على رسم السير دائماً
+            mesh.alwaysSelectAsActiveMesh = true; 
+
+            const pbr = new BABYLON.PBRMaterial("pvcBelt", scene);
+            pbr.metallic = 0.0; 
+            pbr.roughness = 0.9; 
+            pbr.clearCoat.isEnabled = false; 
+            pbr.backFaceCulling = false; 
+            
+			pbr.albedoTexture.wAng = Math.PI / 2; // هذا سيقوم بتدوير الخامة 90 درجة لتعود أفقية
+
+            // رفع دقة الخامة
+            const dynTex = new BABYLON.DynamicTexture("beltTex", 1024, scene, true);
+            const ctx = dynTex.getContext();
+            
+            // 1. لون السير الأساسي الداكن
+            ctx.fillStyle = '#1c3022'; 
+            ctx.fillRect(0, 0, 1024, 1024);
+            
+            // 2. خط أبيض واحد فقط في المنتصف ليكون علامة تتبع دقيقة
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 500, 1024, 24); 
+            
+            dynTex.update();
+            
+            dynTex.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
+            dynTex.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
+            
+            pbr.albedoTexture = dynTex;
+            mesh.material = pbr;
+            
+            kinematics.belts.push(pbr);
+        }
+    });
+
+    UI.loader.classList.add('hidden');
+    addLog('Digital Twin asset loaded (Babylon Engine).', 'success');
+    return { scene, kinematics };
+};
+
+createScene().then(({ scene, kinematics }) => {
+    scene.onBeforeRenderObservable.add(() => {
+        const delta = engine.getDeltaTime() / 1000.0;
+        UI.fps.innerText = Math.round(engine.getFps());
+        
+        SIM.rpm += (SIM.targetRpm - SIM.rpm) * delta * 2;
+        
+        if (Math.abs(SIM.rpm) > 0.1) {
+            const rotationStep = ((SIM.rpm * Math.PI) / 30) * delta;
+            
+            kinematics.pulleys.forEach(pulley => {
+                pulley.rotate(BABYLON.Axis.Z, rotationStep, BABYLON.Space.LOCAL);
+            });
+            
+            const uvScrollStep = (SIM.rpm / 60) * delta * 0.5;
+			kinematics.belts.forEach(belt => {
+			belt.texture.uOffset -= (SIM.rpm / 6000) * engine.getDeltaTime(); 
+			belt.texture.update();
+			});
+        }
+    });
+
+    engine.runRenderLoop(() => { scene.render(); });
+});
+
+window.addEventListener('resize', () => { engine.resize(); });
+
+function generateTelemetry() {
+    if (!SIM.isRunning) return;
+    const noise = (Math.random() - 0.5) * 5; 
+    SIM.targetRpm = Math.max(0, Math.min(SIM.maxRpm, SIM.targetRpm + noise));
+    SIM.current = 0.5 + ((SIM.targetRpm / SIM.maxRpm) * 2.5) + ((Math.random() - 0.5) * 0.1);
+    SIM.voltage = 24.0 - (SIM.current * 0.1);
+    
+    UI.rpm.innerText = SIM.targetRpm.toFixed(1);
+    UI.amp.innerText = SIM.current.toFixed(2);
+    UI.volt.innerText = SIM.voltage.toFixed(1);
+}
+
+UI.btnRun.addEventListener('click', () => {
+    if (SIM.isRunning) return;
+    SIM.isRunning = true; SIM.targetRpm = 120;
+    UI.statusPill.classList.remove('stopped'); UI.status.innerText = 'DATA STREAM ACTIVE';
+    SIM.interval = setInterval(generateTelemetry, 500);
+});
+
+UI.btnStop.addEventListener('click', () => {
+    SIM.isRunning = false; SIM.targetRpm = 0; SIM.current = 0; SIM.voltage = 24.0;
+    clearInterval(SIM.interval);
+    UI.statusPill.classList.add('stopped'); UI.status.innerText = 'SYSTEM STOPPED';
+    UI.rpm.innerText = '0.0'; UI.amp.innerText = '0.00'; UI.volt.innerText = '24.0';
+});

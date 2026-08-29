@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="Digital Twin dashboard for a production-line conveyor system — real-time telemetry, AI predictive analytics, and interactive 3D inspection via Babylon.js.">
+    <title>Digital Twin | Conveyor System</title>
+
+    <link rel="stylesheet" href="style.css?v=9">
+
+    <!-- Inter (UI) + JetBrains Mono (data values) -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <!-- LOADING SCREEN -->
+    <div id="loading-screen">
+        <div class="loader-content">
+            <p class="loader-eyebrow">Babylon.js · Digital Twin Engine</p>
+            <h1 class="loader-title">Initializing Digital Twin</h1>
+            <div class="loader-bar"></div>
+            <p class="loader-path">Loading asset: Conveyor_Twin_v1.glb</p>
+        </div>
+    </div>
+
+    <!-- FULL SCREEN 3D CANVAS -->
+    <canvas id="canvas3d"></canvas>
+
+    <!-- FLOATING HUD OVERLAY -->
+    <div id="hud-container">
+
+        <!-- TOP STATUS BAR -->
+        <header id="top-hud">
+            <div class="hud-brand">
+                <span class="brand-name">Conveyor.01</span>
+                <div class="brand-divider"></div>
+                <span class="brand-sub">Digital Twin v1.0</span>
+            </div>
+
+            <!-- Tab Switcher -->
+            <nav class="hud-tabs">
+                <button class="hud-tab-btn active" data-tab="overview">Executive Overview</button>
+                <button class="hud-tab-btn" data-tab="model">3D Model</button>
+                <button class="hud-tab-btn" data-tab="simulation">Simulation</button>
+                <button class="hud-tab-btn" data-tab="optimization">Optimization</button>
+            </nav>
+
+            <div class="hud-status">
+                <button id="btn-theme-toggle" class="btn-aero outline"
+                    style="padding: 0.2rem 0.5rem; font-size: 0.72rem; border-radius: var(--radius-sm); margin-right: 0.75rem; display: inline-flex; align-items: center; gap: 4px; height: 26px; cursor: pointer; border: 1px solid var(--border-subtle); background: var(--surface-2); color: var(--text-primary); font-family: var(--font-ui);">
+                    <span id="theme-toggle-icon"></span>
+                    <span id="theme-toggle-text">Dark Mode</span>
+                </button>
+                <span class="hw-badge hw-sim" id="hw-mode-badge">SIM MODE</span>
+                <span class="status-dot" id="status-indicator"></span>
+                <span id="connection-status">Standby</span>
+            </div>
+        </header>
+
+        <!-- TAB VIEWS CONTAINER -->
+        <div id="tab-views">
+
+            <!-- TAB 1: EXECUTIVE OVERVIEW -->
+            <div id="view-overview" class="tab-view active">
+                <div class="dashboard-grid">
+                    <!-- Column 1: Production Performance -->
+                    <div class="dashboard-col">
+                        <div class="panel-section">
+                            <h3 class="section-title">Production Performance</h3>
+                            <div class="telemetry-grid">
+                                <div class="metric-card primary-metric">
+                                    <span class="metric-label">Line Status</span>
+                                    <div class="metric-value" style="color: var(--status-ok);" id="tele-state-text">
+                                        Standby</div>
+                                </div>
+                            </div>
+
+                            <div class="telemetry-grid cols-2 mt-3">
+                                <div class="metric-card">
+                                    <span class="metric-label">Production Rate</span>
+                                    <div class="metric-value-small"><span id="tele-rate">0.0</span> <small
+                                            style="font-size:0.75rem;color:var(--text-label)">units/min</small></div>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="metric-label">OEE Quality</span>
+                                    <div class="metric-value-small">99.8%</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Column 2: Resource & Operational Cost -->
+                    <div class="dashboard-col">
+                        <div class="panel-section">
+                            <h3 class="section-title">Resource & Operational Cost</h3>
+                            <div class="telemetry-grid">
+                                <div class="metric-card primary-metric">
+                                    <span class="metric-label">Total Energy Used</span>
+                                    <div class="metric-value"><span id="tele-energy">0.000</span> <small
+                                            style="font-size:1rem;font-weight:400;color:var(--text-label)">kWh</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="telemetry-grid cols-2 mt-3">
+                                <div class="metric-card">
+                                    <span class="metric-label">Operating Cost (Est.)</span>
+                                    <div class="metric-value-small">$<span id="tele-cost">0.00</span></div>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="metric-label">Overall OEE Score</span>
+                                    <div class="metric-value-small" id="tele-oee">0.0%</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Column 3: Sustainability & Optimization -->
+                    <div class="dashboard-col">
+                        <div class="panel-section">
+                            <h3 class="section-title">Efficiency & Sustainability</h3>
+                            <div class="telemetry-grid">
+                                <div class="metric-card primary-metric">
+                                    <span class="metric-label">Eco-Mode Savings</span>
+                                    <div class="metric-value" style="color: var(--status-ok);"><span
+                                            id="tele-savings">0.0</span>%</div>
+                                </div>
+                                <div class="metric-card primary-metric">
+                                    <span class="metric-label">--</span>
+                                    <div class="metric-value"><span id="tele-c">0.00</span> <small
+                                            style="font-size:1rem;font-weight:400;color:var(--text-label)">kg</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="telemetry-grid cols-2 mt-3">
+                                <div class="metric-card">
+                                    <span class="metric-label">Asset Life (RUL)</span>
+                                    <div class="metric-value-small" id="ai-rul">142.5 d</div>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="metric-label">Anomaly Risk</span>
+                                    <div class="metric-value-small" id="ai-anomaly">0.8%</div>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="metric-label">Efficiency Index</span>
+                                    <div class="metric-value-small" id="ai-efficiency">94.2%</div>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="metric-label">Predictive Status</span>
+                                    <div class="metric-value-small" id="ai-service" style="font-size:0.8rem;">Nominal
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Column 3: System Event Log -->
+                    <div class="dashboard-col flex-grow">
+                        <div class="panel-section log-panel-section flex-grow" id="log-panel-section"
+                            style="border-bottom: none; height: 100%;">
+                            <h3 class="section-title">
+                                Event Log
+                                <button class="log-toggle" id="log-toggle" title="Collapse log">
+                                    <!-- Chevron down SVG -->
+                                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
+                                        xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M2 4L6 8L10 4" stroke="currentColor" stroke-width="1.5"
+                                            stroke-linecap="round" stroke-linejoin="round" />
+                                    </svg>
+                                </button>
+                            </h3>
+                            <div id="system-log" class="aero-log">
+                                <div class="log-entry">Boot sequence initiated...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: 3D MODEL -->
+            <div id="view-model" class="tab-view">
+                <!-- Control Panel (Left Panel) -->
+                <aside class="glass-panel panel-left floating-panel">
+                    <div id="model-hw-banner" class="sim-suspended-banner hidden">
+                        ⚠ Hardware not connected. Connect live hardware via MQTT to use controls.
+                    </div>
+                    <div class="panel-section">
+                        <h3 class="section-title">System Commands (Real Hardware)</h3>
+                        <div class="command-group">
+                            <label class="metric-label" for="input-rpm">Target RPM Setpoint</label>
+                            <div class="input-wrapper">
+                                <input type="number" id="input-rpm" class="aero-input" min="0" max="167" value="120"
+                                    step="1">
+                                <button id="btn-set-rpm" class="btn-aero outline">Set</button>
+                            </div>
+                        </div>
+                        <div class="action-buttons mt-3">
+                            <button id="btn-run" class="btn-aero primary">Engage System</button>
+                            <button id="btn-stop" class="btn-aero danger">Stop</button>
+                        </div>
+                        <!-- E-STOP -->
+                        <button id="btn-estop" class="btn-estop mt-2">
+                            <span class="estop-icon">⬡</span>
+                            <span class="estop-text">Emergency Stop — Hold</span>
+                            <div class="estop-progress"></div>
+                        </button>
+                        <!-- HARD POWER CUT — NB2 Breaker Remote Open -->
+                        <button id="btn-hard-off" class="btn-hard-off mt-2" disabled>
+                            <span class="hard-off-icon">⚡</span>
+                            <span class="hard-off-text">HARD POWER CUT — NB2 Breaker</span>
+                        </button>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3 class="section-title">Hardware Integration</h3>
+                        <button id="btn-mqtt-connect" class="btn-aero primary w-100 mb-3"
+                            style="margin-bottom: 0.75rem;">Connect Live Hardware</button>
+                        <div class="sensor-status-list" style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <div class="stat-chip"
+                                style="display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; color: var(--text-label); font-family: var(--font-ui);">
+                                <span>ESP32 Bridge:</span>
+                                <span id="status-esp32" class="inspect-status-pill status-critical"
+                                    style="font-size:0.65rem;">Disconnected</span>
+                            </div>
+                            <div class="stat-chip"
+                                style="display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; color: var(--text-label); font-family: var(--font-ui);">
+                                <span>Drive Motor:</span>
+                                <span id="status-motor" class="inspect-status-pill status-critical"
+                                    style="font-size:0.65rem;">Disconnected</span>
+                            </div>
+                            <div class="stat-chip"
+                                style="display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; color: var(--text-label); font-family: var(--font-ui);">
+                                <span>Proximity Sensor:</span>
+                                <span id="status-proximity" class="inspect-status-pill status-critical"
+                                    style="font-size:0.65rem;">Disconnected</span>
+                            </div>
+                            <div class="stat-chip"
+                                style="display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; color: var(--text-label); font-family: var(--font-ui);">
+                                <span>Temp Sensor:</span>
+                                <span id="status-temp" class="inspect-status-pill status-critical"
+                                    style="font-size:0.65rem;">Disconnected</span>
+                            </div>
+                            <div class="stat-chip"
+                                style="display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; color: var(--text-label); font-family: var(--font-ui);">
+                                <span>Weight Sensor:</span>
+                                <span id="status-weight" class="inspect-status-pill status-critical"
+                                    style="font-size:0.65rem;">Disconnected</span>
+                            </div>
+                            <div class="stat-chip"
+                                style="display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; color: var(--text-label); font-family: var(--font-ui);">
+                                <span>Vibration Sensor:</span>
+                                <span id="status-vibration" class="inspect-status-pill status-critical"
+                                    style="font-size:0.65rem;">Disconnected</span>
+                            </div>
+                            <div class="stat-chip"
+                                style="display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; color: var(--text-label); font-family: var(--font-ui);">
+                                <span>NB2 Breaker (RS485):</span>
+                                <span id="status-breaker" class="inspect-status-pill status-critical"
+                                    style="font-size:0.65rem;">Disconnected</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3 class="section-title">Live Telemetry</h3>
+                        <div class="telemetry-grid cols-2">
+                            <div class="metric-card">
+                                <span class="metric-label">Throughput</span>
+                                <div class="metric-value-small"><span id="tele-count">0</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">Units</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Line Speed</span>
+                                <div class="metric-value-small"><span id="tele-speed">0.00</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">m/s</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Motor Rate</span>
+                                <div class="metric-value-small"><span id="tele-rpm">0.0</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">RPM</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Current Draw</span>
+                                <div class="metric-value-small"><span id="tele-amp">0.00</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">A</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Bus Voltage</span>
+                                <div class="metric-value-small"><span id="tele-volt">12.0</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">V</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Power Demand</span>
+                                <div class="metric-value-small"><span id="tele-power">0.000</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">kW</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Proximity</span>
+                                <div class="metric-value-small"><span id="tele-proximity" style="color: var(--text-primary); transition: color 0.15s;">Idle</span></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Temperature</span>
+                                <div class="metric-value-small"><span id="tele-temp-val">24.3</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">°C</small></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- NB2 CHINT BREAKER — Power Monitor -->
+                    <div class="panel-section nb2-power-monitor">
+                        <h3 class="section-title">
+                            ⚡ AC Power Monitor
+                            <span id="nb2-breaker-state" class="nb2-state-badge nb2-state-off">OFF</span>
+                        </h3>
+                        <div class="telemetry-grid cols-2">
+                            <div class="metric-card">
+                                <span class="metric-label">AC Voltage</span>
+                                <div class="metric-value-small"><span id="nb2-voltage">--</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">V</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">AC Current</span>
+                                <div class="metric-value-small"><span id="nb2-current">--</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">A</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Active Power</span>
+                                <div class="metric-value-small"><span id="nb2-power">--</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">W</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Power Factor</span>
+                                <div class="metric-value-small"><span id="nb2-pf">--</span></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Frequency</span>
+                                <div class="metric-value-small"><span id="nb2-frequency">--</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">Hz</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Total Energy</span>
+                                <div class="metric-value-small"><span id="nb2-energy">--</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">Wh</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Apparent Power</span>
+                                <div class="metric-value-small"><span id="nb2-apparent">--</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">VA</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Reactive Power</span>
+                                <div class="metric-value-small"><span id="nb2-reactive">--</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">var</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Breaker Temp</span>
+                                <div class="metric-value-small"><span id="nb2-temp">--</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">°C</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Residual I</span>
+                                <div class="metric-value-small"><span id="nb2-residual">--</span> <small
+                                        style="font-size:0.65rem;color:var(--text-label)">mA</small></div>
+                            </div>
+                        </div>
+                        <!-- Breaker Remote Control -->
+                        <!-- NB2 Unlock row: operator must press Unlock before ON/OFF is sent -->
+                        <div class="nb2-unlock-row mt-3">
+                            <button id="btn-nb2-unlock" class="btn-aero outline nb2-unlock-btn" disabled>
+                                🔓 Unlock Breaker Control
+                            </button>
+                            <span id="nb2-unlock-badge" class="nb2-unlock-badge locked">LOCKED</span>
+                        </div>
+                        <div id="nb2-unlock-countdown" class="nb2-unlock-countdown hidden">
+                            Authorization window: <span id="nb2-unlock-timer">30</span>s remaining
+                        </div>
+                        <div class="nb2-control-row mt-2">
+                            <button id="btn-nb2-on" class="btn-aero primary nb2-ctrl-btn" disabled>Breaker ON</button>
+                            <button id="btn-nb2-off" class="btn-aero danger nb2-ctrl-btn" disabled>Breaker OFF</button>
+                        </div>
+                        <!-- Fault/Alarm indicator -->
+                        <div id="nb2-fault-bar" class="nb2-fault-bar hidden mt-2">
+                            <span class="nb2-fault-icon">⚠</span>
+                            <span id="nb2-fault-text">No faults</span>
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3 class="section-title">Camera Mode</h3>
+                        <div class="cam-select-wrap w-100">
+                            <select id="select-camera-mode" class="w-100"
+                                style="padding: 0.35rem 0.5rem; height: 32px; background: var(--surface-2); border: 1px solid var(--border-subtle); color: var(--text-secondary); border-radius: var(--radius-sm); outline: none;">
+                                <option value="orbit">Free Orbit</option>
+                                <option value="product" disabled>Product Follow (Disabled)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3 class="section-title">Performance</h3>
+                        <div class="stat-chip"
+                            style="font-family: var(--font-ui); font-size: 0.75rem; color: var(--text-label); display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                            <span>Telemetry Rate:</span>
+                            <span class="stat-value" id="fps-counter"
+                                style="font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; color: var(--text-primary);">0</span>
+                            <span style="font-size: 0.65rem;">FPS</span>
+                        </div>
+                    </div>
+                </aside>
+
+
+                <!-- Floating Component Inspector (Right Panel) -->
+                    <aside class="glass-panel panel-right floating-panel" style="display:flex; flex-direction:column;">
+                    <!-- Live Replica Status — read-only, MQTT data only, never simulation -->
+                    <div class="panel-section" id="replica-status-section" style="border-bottom: 1px solid var(--border-subtle); flex-shrink: 0;">
+                        <h3 class="section-title">Live Replica Status</h3>
+                        <div id="replica-stale-warning" class="stale-warning hidden">⚠ MQTT stream stale — model frozen</div>
+                        <div class="telemetry-grid cols-2">
+                            <div class="metric-card">
+                                <span class="metric-label">Motor RPM</span>
+                                <div class="metric-value-small"><span id="model-replica-rpm">—</span></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Belt Speed</span>
+                                <div class="metric-value-small"><span id="model-replica-speed">—</span> <small style="font-size:0.65rem;color:var(--text-label)">m/s</small></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Proximity</span>
+                                <div class="metric-value-small"><span id="model-replica-prox">—</span></div>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-label">Pieces</span>
+                                <div class="metric-value-small"><span id="model-replica-count">0</span></div>
+                            </div>
+                        </div>
+                        <div class="stat-chip mt-2" style="font-size:0.72rem;color:var(--text-label);display:flex;align-items:center;justify-content:space-between;">
+                            <span>Last packet:</span>
+                            <span id="model-replica-latency" style="font-family:var(--font-mono);font-weight:600;font-size:0.72rem;">—</span>
+                        </div>
+                        <div class="mqtt-freshness-bar mt-2">
+                            <div class="mqtt-freshness-fill" id="mqtt-freshness-fill"></div>
+                        </div>
+                    </div>
+                    <!-- Floating Component Inspector -->
+                    <div class="panel-section" id="inspector-section" style="border-bottom: 1px solid var(--border-subtle); flex-shrink: 0;">
+                        <h3 class="section-title">Component Inspector</h3>
+                        <div id="inspector-idle" class="inspector-idle-text">
+                            Click any component in the 3D viewport to inspect
+                        </div>
+                        <div id="inspector-details" class="hidden">
+                            <h4 id="inspect-name" class="inspect-title">Component Name</h4>
+                            <div class="inspect-row mt-2">
+                                <span class="inspect-label">Category</span>
+                                <span id="inspect-category" class="inspect-val">N/A</span>
+                            </div>
+                            <div class="inspect-row mt-1">
+                                <span class="inspect-label">Specs</span>
+                                <span id="inspect-specs" class="inspect-val">N/A</span>
+                            </div>
+                            <div class="inspect-row mt-1">
+                                <span class="inspect-label">Health</span>
+                                <span id="inspect-status" class="inspect-status-pill status-healthy">Operational</span>
+                            </div>
+                            <button id="btn-focus-part" class="btn-aero outline mt-3 w-100">Focus Camera</button>
+                        </div>
+                    </div>
+
+                    <!-- #ADD CAMERA EXT — Camera Feed section inside right panel -->
+                    <div class="panel-section camfeed-panel-section" id="camfeed-panel-section" style="border-bottom: none; display: flex; flex-direction: column; flex-shrink: 0;">
+                        <!-- Section header with show/hide toggle -->
+                        <h3 class="section-title" style="flex-shrink:0;">
+                            <span style="display:flex; align-items:center; gap:0.5rem;">
+                                <!-- #ADD CAMERA EXT — REC dot indicator -->
+                                <span class="camfeed-rec-dot" id="camfeed-rec-dot"></span>
+                                Live Feed
+                            </span>
+                            <!-- #ADD CAMERA EXT — collapse/expand toggle -->
+                            <button class="log-toggle" id="btn-camfeed-toggle" title="Toggle feed">
+                                <svg id="camfeed-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none"
+                                    xmlns="http://www.w3.org/2000/svg" style="transform: rotate(-90deg); transition: transform 0.2s;">
+                                    <path d="M2 4L6 8L10 4" stroke="currentColor" stroke-width="1.5"
+                                        stroke-linecap="round" stroke-linejoin="round" />
+                                </svg>
+                            </button>
+                        </h3>
+
+                        <!-- #ADD CAMERA EXT — collapsible feed body -->
+                        <div id="camfeed-body" style="width:100%; display:none; flex-direction:column; gap:0; flex-shrink:0;">
+
+                            <!-- Video viewport — 16:9 -->
+                            <div class="camfeed-viewport" id="camfeed-viewport">
+                                <!-- #ADD CAMERA EXT — error overlay -->
+                                <div id="camfeed-error" class="camfeed-error" style="display:none;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4;">
+                                        <circle cx="12" cy="12" r="10"/>
+                                        <line x1="12" y1="8" x2="12" y2="12"/>
+                                        <circle cx="12" cy="16" r="0.5" fill="currentColor"/>
+                                    </svg>
+                                    <span class="camfeed-error-title">Server Not Available</span>
+                                    <span class="camfeed-error-sub">Feed source unreachable</span>
+                                </div>
+
+                                <!-- #ADD CAMERA EXT — loading spinner -->
+                                <div id="camfeed-loading" class="camfeed-loading">
+                                    <div class="camfeed-spinner"></div>
+                                    <span>Connecting to feed…</span>
+                                </div>
+
+                                <!-- #ADD CAMERA EXT — feed image element -->
+                                <!-- #CAM FEED URL — replace the src below with your camera stream URL -->
+                                <iframe
+                                    id="camfeed-img"
+                                    class="camfeed-img" style="display:none; border:none;"
+                                    src="http://192.168.1.32:8889/line_01/"
+                                    title="Live feed"
+                                ></iframe>
+                            </div>
+
+                            <!-- #ADD CAMERA EXT — zoom bar + D-pad controls -->
+                            <div class="camfeed-controls">
+                                <!-- Zoom -->
+                                <div class="camfeed-zoom-group">
+                                    <button id="btn-cam-zoom-in" class="cam-ctrl-btn" title="Zoom In">
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                                    </button>
+                                    <div class="camfeed-zoom-track">
+                                        <div class="camfeed-zoom-fill" id="camfeed-zoom-fill"></div>
+                                    </div>
+                                    <button id="btn-cam-zoom-out" class="cam-ctrl-btn" title="Zoom Out">
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                                    </button>
+                                    <button id="btn-cam-zoom-reset" class="cam-ctrl-btn-sm" title="Reset Zoom">1:1</button>
+                                </div>
+
+                                <!-- D-pad -->
+                                <div class="camfeed-dpad">
+                                    <button id="btn-cam-up"    class="dpad-btn dpad-up"    title="Pan Up"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,7 5,3 8,7"/></svg></button>
+                                    <button id="btn-cam-left"  class="dpad-btn dpad-left"  title="Pan Left"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="7,2 3,5 7,8"/></svg></button>
+                                    <div class="dpad-center"></div>
+                                    <button id="btn-cam-right" class="dpad-btn dpad-right" title="Pan Right"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,2 7,5 3,8"/></svg></button>
+                                    <button id="btn-cam-down"  class="dpad-btn dpad-down"  title="Pan Down"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,3 5,7 8,3"/></svg></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- END #ADD CAMERA EXT -->
+
+                </aside>
+            </div>
+
+            <!-- TAB 3: SIMULATION -->
+            <div id="view-simulation" class="tab-view">
+                <!-- Simulation Controls Panel (Left Panel) -->
+                <aside class="glass-panel panel-left floating-panel">
+                    <div id="sim-hw-banner" class="sim-suspended-banner hidden">
+                        ⚙ Simulation suspended — Hardware Mode active. Disconnect MQTT to use simulation.
+                    </div>
+                    <div class="panel-section">
+                        <h3 class="section-title">Simulation Parameters</h3>
+
+                        <div class="command-group">
+                            <label class="metric-label" for="sim-input-rpm">Simulated Speed Setpoint</label>
+                            <div class="input-wrapper">
+                                <input type="number" id="sim-input-rpm" class="aero-input" min="0" max="200" value="120"
+                                    step="1">
+                                <button id="btn-sim-set-rpm" class="btn-aero outline">Set</button>
+                            </div>
+                        </div>
+
+                        <div class="command-group mt-2">
+                            <label class="metric-label" for="sim-input-volt">Simulation Voltage Source</label>
+                            <div class="input-wrapper">
+                                <input type="number" id="sim-input-volt" class="aero-input" min="0" max="24"
+                                    value="12.0" step="0.1">
+                                <button id="btn-sim-set-volt" class="btn-aero outline">Set</button>
+                            </div>
+                        </div>
+
+                        <div class="command-group mt-2">
+                            <label class="metric-label" for="sim-input-load">Conveyor Material Load (kg)</label>
+                            <div class="input-wrapper">
+                                <input type="number" id="sim-input-load" class="aero-input" min="0" max="25" value="0.0"
+                                    step="0.1">
+                                <button id="btn-sim-set-load" class="btn-aero outline">Set</button>
+                            </div>
+                        </div>
+
+                        <div class="action-buttons mt-3">
+                            <button id="btn-sim-run" class="btn-aero primary">Start Sim</button>
+                            <button id="btn-sim-stop" class="btn-aero danger">Stop Sim</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3 class="section-title">Diagnostic Faults</h3>
+                        <div class="command-group flex-col gap-2">
+                            <button id="btn-fault-motor" class="btn-aero outline text-left w-100">Simulate Motor
+                                Overheat</button>
+                            <button id="btn-fault-screw" class="btn-aero outline text-left w-100 mt-2">Simulate Loose
+                                Screw</button>
+                            <button id="btn-fault-belt" class="btn-aero outline text-left w-100 mt-2">Simulate Belt
+                                Overload</button>
+                            <button id="btn-fault-reset" class="btn-aero danger w-100 mt-3">Reset / Clear All
+                                Faults</button>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+
+            <!-- TAB 4: OPTIMIZATION -->
+            <div id="view-optimization" class="tab-view">
+                <div class="center-grid-2">
+                    <!-- Column 1: AI Predictive Analytics -->
+                    <div class="dashboard-col">
+                        <div class="panel-section" style="border-bottom: none;">
+                            <h3 class="section-title">AI Predictive Analytics</h3>
+                            <div class="telemetry-grid cols-2">
+                                <div class="metric-card">
+                                    <span class="metric-label">Remaining Useful Life</span>
+                                    <div class="metric-value-small" id="ai-rul">142.5 d</div>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="metric-label">Anomaly Probability</span>
+                                    <div class="metric-value-small" id="ai-anomaly">0.8%</div>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="metric-label">Efficiency Index</span>
+                                    <div class="metric-value-small" id="ai-efficiency">94.2%</div>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="metric-label">Next Service</span>
+                                    <div class="metric-value-small" id="ai-service" style="font-size:0.8rem;">Nominal
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Column 2: System Optimizer -->
+                    <div class="dashboard-col">
+                        <div class="panel-section">
+                            <h3 class="section-title">System Optimizer</h3>
+
+                            <div class="command-group">
+                                <label class="metric-label" style="display: flex; justify-content: space-between;">
+                                    <span>Eco-Mode (Energy Saver)</span>
+                                    <span id="eco-mode-status"
+                                        style="color: var(--status-ok); font-weight: 600;">ACTIVE</span>
+                                </label>
+                                <button id="btn-toggle-eco" class="btn-aero primary w-100 mt-2">Disable
+                                    Eco-Mode</button>
+                            </div>
+
+                            <div class="command-group mt-3">
+                                <span class="metric-label">Efficiency Profile</span>
+                                <div
+                                    style="font-family: var(--font-ui); font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                                    Intelligent control loop is managing motor current dynamically.
+                                </div>
+                                <button id="btn-optimize-speed" class="btn-aero outline w-100 mt-3">Run Speed
+                                    Optimization Sweep</button>
+                            </div>
+                        </div>
+
+                        <!-- Optimization Advisory -->
+                        <div class="panel-section flex-grow"
+                            style="border-bottom: none; display: flex; flex-direction: column;">
+                            <h3 class="section-title">AI Recommendation Log</h3>
+                            <div id="optimization-log" class="aero-log" style="flex: 1; overflow-y: auto;">
+                                <div class="log-entry info"><span class="timestamp">[07:18:00]</span> Eco-Mode:
+                                    Activated energy saving profile.</div>
+                                <div class="log-entry success"><span class="timestamp">[07:18:05]</span> Optimizer:
+                                    Settled at 120 RPM (Peak Efficiency).</div>
+                                <div class="log-entry info"><span class="timestamp">[07:18:10]</span> Advisory: Current
+                                    belt torque is within normal limits.</div>
+                            </div>
+                        </div>
+                    </div>
+                    </div>
+                </aside>
+            </div>
+
+        <!-- Scripts -->
+        <script src="https://cdn.babylonjs.com/babylon.js"></script>
+        <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+        <!-- MQTT.js — broker communication over WebSockets -->
+        <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+        <script src="app.js?v=11"></script>
+</body>
+</body>
+
+</html>

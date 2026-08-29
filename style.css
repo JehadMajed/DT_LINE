@@ -1,0 +1,1727 @@
+/* ==========================================================================
+   DESIGN TOKENS — Industrial SaaS Dark Theme
+   Surface contrast fix: bg-base = Slate-950, surface-1 = Slate-800 @ 75%
+   so backdrop-filter actually separates panels from canvas.
+   ========================================================================== */
+:root {
+    /* Typography */
+    --font-ui:   'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+    /* Spacing */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+}
+
+html[data-theme="light"] {
+    /* Backgrounds */
+    --bg-base:         #F1F5F9;               /* Slate-100 — canvas & body       */
+    --surface-1:       rgba(255, 255, 255, 0.82); /* Semi-transparent pure white  */
+    --surface-2:       rgba(241, 245, 249, 0.90); /* Soft gray inset cards        */
+    --surface-inset:   rgba(15, 23, 42, 0.04);  /* Subtle dark inset for inputs  */
+
+    /* Borders */
+    --border-subtle:   rgba(15, 23, 42, 0.08);   /* 1px dark panel stroke        */
+    --border-focus:    rgba(15, 23, 42, 0.15);   /* focused / interactive border  */
+    --border-divider:  rgba(15, 23, 42, 0.06);   /* section separator             */
+
+    /* Text */
+    --text-primary:    #0F172A;                  /* Slate-900 — high contrast    */
+    --text-secondary:  #334155;                  /* Slate-700 — description text */
+    --text-label:      #64748B;                  /* Slate-500 — static headings  */
+
+    /* Accent — Professional Sky Blue */
+    --accent:          #0284C7;                  /* Sky-600                      */
+    --accent-subtle:   rgba(2, 132, 199, 0.08);  /* hover/active tint            */
+    --accent-muted:    rgba(2, 132, 199, 0.25);  /* borders on accented elements */
+
+    /* Semantic Status — ONLY for alerts, warnings, nominal states */
+    --status-ok:       #16A34A;                  /* Green-600                    */
+    --status-ok-bg:    rgba(22, 163, 74, 0.08);
+    --status-ok-border:rgba(22, 163, 74, 0.20);
+    --status-warn:     #D97706;                  /* Amber-600                    */
+    --status-warn-bg:  rgba(217, 119, 6, 0.08);
+    --status-warn-border: rgba(217, 119, 6, 0.20);
+    --status-crit:     #DC2626;                  /* Red-600                      */
+    --status-crit-bg:  rgba(220, 38, 38, 0.08);
+    --status-crit-border: rgba(220, 38, 38, 0.20);
+}
+
+html[data-theme="dark"] {
+    /* Backgrounds */
+    --bg-base:         #0F172A;               /* Slate-950 — canvas & body       */
+    --surface-1:       rgba(30, 41, 59, 0.75);  /* Slate-800 @ 75% — panels      */
+    --surface-2:       rgba(51, 65, 85, 0.60);  /* Slate-700 @ 60% — inset cards */
+    --surface-inset:   rgba(15, 23, 42, 0.50);  /* inset inputs / command groups */
+
+    /* Borders */
+    --border-subtle:   rgba(255, 255, 255, 0.09); /* 1px panel stroke             */
+    --border-focus:    rgba(255, 255, 255, 0.18); /* focused / interactive border  */
+    --border-divider:  rgba(255, 255, 255, 0.06); /* section separator             */
+
+    /* Text */
+    --text-primary:    #F1F5F9;                    /* Slate-100                    */
+    --text-secondary:  #E2E8F0;                    /* Slate-200 — high contrast    */
+    --text-label:      #CBD5E1;                    /* Slate-300 — static headings  */
+
+    /* Accent — Professional Sky Blue */
+    --accent:          #0284C7;                    /* Sky-600                      */
+    --accent-subtle:   rgba(2, 132, 199, 0.12);    /* hover/active tint            */
+    --accent-muted:    rgba(2, 132, 199, 0.35);    /* borders on accented elements */
+
+    /* Semantic Status — ONLY for alerts, warnings, nominal states */
+    --status-ok:       #22C55E;                    /* Green-500                    */
+    --status-ok-bg:    rgba(34, 197, 94, 0.10);
+    --status-ok-border:rgba(34, 197, 94, 0.30);
+    --status-warn:     #F59E0B;                    /* Amber-500                    */
+    --status-warn-bg:  rgba(245, 158, 11, 0.10);
+    --status-warn-border: rgba(245, 158, 11, 0.30);
+    --status-crit:     #EF4444;                    /* Red-500                      */
+    --status-crit-bg:  rgba(239, 68, 68, 0.10);
+    --status-crit-border: rgba(239, 68, 68, 0.30);
+}
+
+/* ==========================================================================
+   RESET & BASE
+   ========================================================================== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: var(--font-ui);
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Hide global scrollbars; panels get custom ones */
+::-webkit-scrollbar { display: none; }
+* { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ==========================================================================
+   LOADING SCREEN
+   ========================================================================== */
+#loading-screen {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-base);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.8s ease;
+}
+
+#loading-screen.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.loader-content {
+    text-align: center;
+    width: 320px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.loader-eyebrow {
+    font-family: var(--font-ui);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--text-label);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.loader-title {
+    font-family: var(--font-ui);
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+
+.loader-bar {
+    width: 100%;
+    height: 2px;
+    background: var(--border-subtle);
+    border-radius: 1px;
+    position: relative;
+    overflow: hidden;
+}
+
+.loader-bar::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; height: 100%; width: 35%;
+    background: var(--accent);
+    border-radius: 1px;
+    animation: loader-sweep 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes loader-sweep {
+    0%   { left: -35%; }
+    100% { left: 105%; }
+}
+
+.loader-path {
+    font-family: var(--font-mono);
+    color: var(--text-label);
+    font-size: 0.6875rem;
+}
+
+/* ==========================================================================
+   3D CANVAS
+   ========================================================================== */
+#canvas3d {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    z-index: 1;
+    outline: none;
+}
+
+/* ==========================================================================
+   HUD CONTAINER
+   ========================================================================== */
+#hud-container {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ==========================================================================
+   TOP HUD BAR
+   ========================================================================== */
+#top-hud {
+    height: 44px;
+    background: var(--surface-1);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border-divider);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 1.5rem;
+    pointer-events: auto;
+    flex-shrink: 0;
+}
+
+.hud-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+}
+
+.brand-name {
+    font-family: var(--font-ui);
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+
+.brand-divider {
+    width: 1px;
+    height: 14px;
+    background: var(--border-subtle);
+}
+
+.brand-sub {
+    font-family: var(--font-ui);
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--text-label);
+    letter-spacing: 0.01em;
+}
+
+.hud-center {
+    display: flex;
+    gap: 1.25rem;
+    align-items: center;
+}
+
+.stat-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-family: var(--font-ui);
+    font-size: 0.75rem;
+    color: var(--text-label);
+}
+
+.stat-chip .stat-value {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Camera Mode Select */
+.cam-select-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+.cam-label {
+    font-family: var(--font-ui);
+    font-size: 0.75rem;
+    color: var(--text-label);
+}
+
+#select-camera-mode {
+    background: var(--surface-2);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    font-family: var(--font-ui);
+    font-size: 0.75rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: var(--radius-sm);
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.15s;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+#select-camera-mode:hover,
+#select-camera-mode:focus {
+    border-color: var(--border-focus);
+}
+
+/* System Status */
+.hud-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.status-dot {
+    width: 6px;
+    height: 6px;
+    background: var(--text-label);
+    border-radius: 50%;
+    transition: background 0.4s ease;
+    flex-shrink: 0;
+}
+
+#connection-status {
+    font-family: var(--font-ui);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--text-label);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    transition: color 0.4s ease;
+}
+
+/* Active system state */
+#top-hud.active .status-dot {
+    background: var(--status-ok);
+    animation: status-pulse 2.5s ease-in-out infinite;
+}
+
+#top-hud.active #connection-status {
+    color: var(--status-ok);
+}
+
+@keyframes status-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.4; }
+}
+
+/* E-STOP halted state */
+#top-hud.halted .status-dot { background: var(--status-crit); animation: none; }
+#top-hud.halted #connection-status { color: var(--status-crit); }
+
+/* ==========================================================================
+   GLASS PANELS — Bento Layout
+   ========================================================================== */
+.glass-panel {
+    position: absolute;
+    top: 56px;
+    bottom: 12px;
+    width: 260px;
+    background: var(--surface-1);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    display: flex;
+    flex-direction: column;
+    pointer-events: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* Sleek panel scrollbar */
+.glass-panel::-webkit-scrollbar {
+    display: block;
+    width: 4px;
+}
+.glass-panel::-webkit-scrollbar-thumb {
+    background: var(--accent-muted);
+    border-radius: 2px;
+}
+.glass-panel::-webkit-scrollbar-thumb:hover {
+    background: var(--accent);
+}
+.glass-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.panel-left  { left: 12px; }
+.panel-right { right: 12px; }
+
+/* ==========================================================================
+   PANEL SECTIONS
+   ========================================================================== */
+.panel-section {
+    padding: 1.125rem 1.25rem;
+    border-bottom: 1px solid var(--border-divider);
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-section.flex-grow {
+    flex: 1;
+    border-bottom: none;
+    overflow: hidden;
+    min-height: 0;
+}
+
+.section-title {
+    font-family: var(--font-ui);
+    font-size: 0.625rem;
+    font-weight: 500;
+    color: var(--text-label);
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* ==========================================================================
+   METRIC LABELS & VALUES
+   ========================================================================== */
+.metric-label {
+    display: block;
+    font-family: var(--font-ui);
+    font-size: 0.6875rem;
+    font-weight: 400;
+    color: var(--text-label);
+    letter-spacing: 0.01em;
+    margin-bottom: 0.2rem;
+}
+
+.metric-value {
+    display: flex;
+    align-items: baseline;
+    gap: 0.25rem;
+    font-family: var(--font-mono);
+    font-size: 2.25rem;
+    font-weight: 600;
+    line-height: 1.1;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+}
+
+/* Secondary metrics (Power, Current, Voltage, PF) */
+.metric-value-small {
+    display: flex;
+    align-items: baseline;
+    gap: 0.25rem;
+    font-family: var(--font-mono);
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   TELEMETRY GRIDS
+   ========================================================================== */
+.telemetry-grid {
+    display: grid;
+    gap: 0.875rem;
+}
+
+.telemetry-grid.cols-2 {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.875rem 0.75rem;
+}
+
+.metric-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 0.75rem;
+}
+
+.metric-card.primary-metric {
+    padding: 0.875rem 1rem;
+}
+
+/* ==========================================================================
+   BENTO COUNTER — replaces old .digital-counter
+   ========================================================================== */
+.bento-counter-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+}
+
+.bento-count-value {
+    font-family: var(--font-ui);
+    font-size: 3rem;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.04em;
+}
+
+.bento-count-unit {
+    font-family: var(--font-ui);
+    font-size: 0.6875rem;
+    font-weight: 400;
+    color: var(--text-label);
+    margin-top: 0.25rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+/* ==========================================================================
+   SENSOR / PROXIMITY INDICATOR
+   ========================================================================== */
+.sensor-container {
+    background: var(--surface-inset);
+    padding: 0.875rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+}
+
+.sensor-readout {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    margin-top: 0.375rem;
+}
+
+.radar-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: transparent;
+    border: 1.5px solid var(--text-label);
+    transition: all 0.1s ease;
+    flex-shrink: 0;
+}
+
+.radar-dot.active {
+    background: var(--status-ok);
+    border-color: var(--status-ok);
+}
+
+.sensor-text {
+    font-family: var(--font-ui);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-label);
+    letter-spacing: 0.03em;
+    transition: color 0.1s;
+}
+
+.radar-dot.active + .sensor-text {
+    color: var(--status-ok);
+}
+
+/* ==========================================================================
+   COMMAND CONTROLS
+   ========================================================================== */
+.command-group {
+    background: var(--surface-inset);
+    padding: 0.875rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+}
+
+.input-wrapper {
+    display: flex;
+    margin-top: 0.5rem;
+    gap: 0.5rem;
+    align-items: flex-end;
+}
+
+.aero-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--border-focus);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 1.375rem;
+    font-weight: 600;
+    padding: 0.25rem 0;
+    outline: none;
+    transition: border-color 0.2s;
+    font-variant-numeric: tabular-nums;
+    width: 100%;
+    min-width: 0;
+}
+
+.aero-input:focus {
+    border-bottom-color: var(--accent);
+}
+
+/* ==========================================================================
+   BUTTONS — Inter, flat, semantic
+   ========================================================================== */
+.btn-aero {
+    font-family: var(--font-ui);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, filter 0.15s;
+    outline: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    border: 1px solid transparent;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+/* Primary — accent filled */
+.btn-aero.primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+.btn-aero.primary:hover {
+    filter: brightness(1.1);
+}
+
+/* Outline — ghost style */
+.btn-aero.outline {
+    background: transparent;
+    border-color: var(--border-focus);
+    color: var(--text-secondary);
+}
+.btn-aero.outline:hover {
+    background: var(--accent-subtle);
+    border-color: var(--accent-muted);
+    color: var(--text-primary);
+}
+
+/* Danger — red ghost */
+.btn-aero.danger {
+    background: transparent;
+    border-color: var(--status-crit-border);
+    color: var(--status-crit);
+}
+.btn-aero.danger:hover {
+    background: var(--status-crit-bg);
+}
+
+/* Action button row */
+.action-buttons {
+    display: flex;
+    gap: 0.5rem;
+}
+.action-buttons .btn-aero {
+    flex: 1;
+    padding: 0.625rem;
+}
+
+/* ==========================================================================
+   E-STOP — Hold-to-Activate
+   ========================================================================== */
+.btn-estop {
+    position: relative;
+    width: 100%;
+    background: var(--status-crit-bg);
+    border: 1px solid var(--status-crit-border);
+    color: var(--status-crit);
+    font-family: var(--font-ui);
+    font-size: 0.8125rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    outline: none;
+    overflow: hidden;
+    text-transform: uppercase;
+    transition: border-color 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.btn-estop:hover {
+    border-color: var(--status-crit);
+}
+
+/* Progress fill that sweeps left→right on hold */
+.estop-progress {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+    width: 0%;
+    background: rgba(239, 68, 68, 0.20);
+    transition: none;
+    pointer-events: none;
+}
+
+.btn-estop.is-pressing .estop-progress {
+    width: 100%;
+    transition: width 1000ms linear;
+}
+
+.estop-icon {
+    font-size: 0.9rem;
+    line-height: 1;
+}
+
+/* ==========================================================================
+   DIAGNOSTIC FAULT BUTTONS — active state: solid 3px left border, no glow
+   ========================================================================== */
+.btn-aero.active-fault-motor {
+    background: var(--status-crit-bg);
+    border-color: var(--status-crit-border);
+    border-left: 3px solid var(--status-crit);
+    color: var(--status-crit);
+    padding-left: calc(1rem - 2px); /* compensate 3px→1px border diff */
+}
+
+.btn-aero.active-fault-screw {
+    background: var(--status-warn-bg);
+    border-color: var(--status-warn-border);
+    border-left: 3px solid var(--status-warn);
+    color: var(--status-warn);
+    padding-left: calc(1rem - 2px);
+}
+
+.btn-aero.active-fault-belt {
+    background: var(--status-warn-bg);
+    border-color: var(--status-warn-border);
+    border-left: 3px solid var(--status-warn);
+    color: var(--status-warn);
+    padding-left: calc(1rem - 2px);
+}
+
+/* ==========================================================================
+   INSPECTOR
+   ========================================================================== */
+.inspector-idle-text {
+    font-family: var(--font-ui);
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--text-label);
+    text-align: center;
+    padding: 2rem 1rem;
+    border: 1px dashed var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-inset);
+    line-height: 1.5;
+}
+
+.inspect-title {
+    font-family: var(--font-ui);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-divider);
+    padding-bottom: 0.5rem;
+}
+
+.inspect-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.75rem;
+    gap: 0.5rem;
+}
+
+.inspect-label {
+    font-family: var(--font-ui);
+    color: var(--text-label);
+    flex-shrink: 0;
+}
+
+.inspect-val {
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    font-weight: 500;
+    text-align: right;
+    font-size: 0.6875rem;
+}
+
+/* Status Pills — semantic palette only */
+.inspect-status-pill {
+    padding: 0.2rem 0.625rem;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-ui);
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border: 1px solid;
+}
+
+.status-healthy {
+    background: var(--status-ok-bg);
+    color: var(--status-ok);
+    border-color: var(--status-ok-border);
+}
+
+.status-warning {
+    background: var(--status-warn-bg);
+    color: var(--status-warn);
+    border-color: var(--status-warn-border);
+}
+
+.status-critical {
+    background: var(--status-crit-bg);
+    color: var(--status-crit);
+    border-color: var(--status-crit-border);
+    animation: critical-flash 1.8s ease-in-out infinite;
+}
+
+@keyframes critical-flash {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.55; }
+}
+
+/* ==========================================================================
+   SYSTEM EVENT LOG
+   ========================================================================== */
+/* Collapsible container */
+.log-panel-section {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    border-bottom: none;
+    overflow: hidden;
+    min-height: 0;
+    padding: 1.125rem 1.25rem;
+    transition: flex 0.3s ease;
+}
+
+.log-panel-section.collapsed {
+    flex: 0 0 44px;   /* just enough for the title row */
+    overflow: hidden;
+}
+
+/* Collapse toggle button inside section-title */
+.log-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-label);
+    padding: 0;
+    display: flex;
+    align-items: center;
+    font-size: 0.75rem;
+    transition: color 0.15s, transform 0.25s;
+    pointer-events: auto;
+}
+
+.log-toggle:hover { color: var(--text-secondary); }
+
+.log-panel-section.collapsed .log-toggle {
+    transform: rotate(180deg);
+}
+
+/* Alert flash — auto-expand on fault */
+@keyframes alert-flash-anim {
+    0%, 100% { background: transparent; }
+    30%       { background: rgba(245, 158, 11, 0.08); }
+}
+
+.log-panel-section.alert-flash {
+    animation: alert-flash-anim 0.6s ease 0s 3;
+}
+
+/* Log entries */
+.aero-log {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-height: 0;
+    margin-top: 0.5rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-muted) transparent;
+}
+
+.aero-log::-webkit-scrollbar { display: block; width: 3px; }
+.aero-log::-webkit-scrollbar-thumb { background: var(--accent-muted); border-radius: 2px; }
+
+.log-entry {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    word-break: break-word;
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-sm);
+    margin-bottom: 0.125rem;
+}
+
+.log-entry .timestamp {
+    color: var(--text-label);
+    margin-right: 0.375rem;
+    opacity: 0.85;
+}
+
+.log-entry.error {
+    background: rgba(239, 68, 68, 0.08); /* 8% red background */
+    color: #FCA5A5; /* Lighter soft red */
+    border-left: 2px solid var(--status-crit);
+}
+
+.log-entry.warning {
+    background: rgba(245, 158, 11, 0.08); /* 8% amber background */
+    color: #FDE68A; /* Lighter soft amber */
+    border-left: 2px solid var(--status-warn);
+}
+
+.log-entry.success {
+    background: rgba(34, 197, 94, 0.06); /* 6% green background */
+    color: #A7F3D0; /* Lighter soft green */
+    border-left: 2px solid var(--status-ok);
+}
+
+.log-entry.info {
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--text-secondary);
+}
+
+/* ==========================================================================
+   UTILITY CLASSES
+   ========================================================================== */
+.flex-col  { display: flex; flex-direction: column; }
+.gap-2     { gap: 0.5rem; }
+.w-100     { width: 100%; }
+.text-left { text-align: left; }
+.mt-1      { margin-top: 0.25rem; }
+.mt-2      { margin-top: 0.5rem; }
+.mt-3      { margin-top: 1rem; }
+
+.hidden { display: none !important; }
+
+/* ==========================================================================
+   HARDWARE / MQTT MODE STYLES
+   ========================================================================== */
+
+/* HW / SIM badge in the top status bar */
+.hw-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    margin-right: 8px;
+    transition: background 0.3s, color 0.3s, box-shadow 0.3s;
+}
+
+.hw-badge.hw-sim {
+    background: rgba(203, 213, 225, 0.08);
+    color: var(--text-label);
+    border: 1px solid rgba(203, 213, 225, 0.15);
+}
+
+.hw-badge.hw-connected {
+    background: rgba(34, 197, 94, 0.12);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.20);
+    animation: hw-pulse 2s ease-in-out infinite;
+}
+
+@keyframes hw-pulse {
+    0%, 100% { box-shadow: 0 0 6px rgba(34, 197, 94, 0.20); }
+    50%       { box-shadow: 0 0 14px rgba(34, 197, 94, 0.40); }
+}
+
+/* Connect Hardware button — teal/emerald accent */
+.btn-aero.hw-connect {
+    background: rgba(16, 185, 129, 0.10);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    font-weight: 600;
+    transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.1s;
+}
+
+.btn-aero.hw-connect:hover {
+    background: rgba(16, 185, 129, 0.20);
+    border-color: rgba(16, 185, 129, 0.60);
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.25);
+    transform: translateY(-1px);
+}
+
+.btn-aero.hw-connect:active {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+/* ==========================================================================
+   AI SAAS TAB VIEW SYSTEM
+   ========================================================================== */
+
+/* Tab navigation bar */
+.hud-tabs {
+    display: flex;
+    gap: 0.25rem;
+    background: rgba(15, 23, 42, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-md);
+    padding: 0.2rem;
+    pointer-events: auto;
+}
+
+.hud-tab-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    outline: none;
+    color: var(--text-label);
+    font-family: var(--font-ui);
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 0.3rem 0.85rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.hud-tab-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.hud-tab-btn.active {
+    background: var(--surface-2);
+    color: var(--text-primary);
+    font-weight: 600;
+    border-color: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Tab views overlay system */
+#tab-views {
+    position: absolute;
+    inset: 44px 0 0 0;
+    pointer-events: none;
+}
+
+.tab-view {
+    display: none;
+    position: absolute;
+    inset: 0;
+    padding: 16px;
+    pointer-events: none;
+}
+
+.tab-view.active {
+    display: flex;
+    gap: 16px;
+    animation: tab-fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes tab-fadeIn {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Clean, enterprise AI background styling when 3D is hidden */
+.tab-view:not(#view-model):not(#view-simulation) {
+    background-color: var(--bg-base);
+    background-image: 
+        radial-gradient(at 0% 0%, rgba(2, 132, 199, 0.06) 0px, transparent 50%),
+        radial-gradient(at 50% 0%, rgba(16, 185, 129, 0.02) 0px, transparent 40%),
+        linear-gradient(rgba(255, 255, 255, 0.003) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.003) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+    pointer-events: auto;
+}
+
+/* Executive Overview Layout (3 columns) */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 320px 320px 1fr;
+    gap: 16px;
+    width: 100%;
+    height: 100%;
+    pointer-events: auto;
+}
+
+/* Centered content layout for Simulation and Optimization tabs */
+.center-grid-2 {
+    display: grid;
+    grid-template-columns: 360px 360px;
+    gap: 20px;
+    margin: 0 auto;
+    justify-content: center;
+    align-content: start;
+    width: 100%;
+    height: 100%;
+    pointer-events: auto;
+    padding-top: 6vh;
+}
+
+.center-grid-2 .dashboard-col {
+    height: fit-content;
+    max-height: 80vh;
+}
+
+.dashboard-col {
+    background: var(--surface-1);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    pointer-events: auto;
+}
+
+.dashboard-col .panel-section {
+    border-bottom: 1px solid var(--border-divider);
+}
+
+.dashboard-col .panel-section:last-child {
+    border-bottom: none;
+}
+
+/* Style Floating Panels inside 3D model tab */
+.floating-panel {
+    top: 16px;
+    bottom: 16px;
+    height: calc(100% - 32px) !important;
+}
+
+.panel-left.floating-panel {
+    left: 16px;
+}
+
+.panel-right.floating-panel {
+    right: 16px;
+    width: 450px;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-muted) transparent;
+}
+
+/* Hide 3D Canvas completely when inactive */
+#canvas3d.hidden {
+    display: none !important;
+}
+
+/* ==========================================================================
+   MQTT-REPLICA LOCK OVERLAY
+   position: fixed — always covers full viewport including the Babylon canvas.
+   Controlled by .hidden class (JS toggles it on tab switch + MQTT connect).
+   ========================================================================== */
+.model-lock-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    transition: opacity 0.4s ease, visibility 0.4s ease;
+}
+
+.model-lock-overlay.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.lock-card {
+    background: var(--surface-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: 16px;
+    padding: 2.5rem 2rem;
+    max-width: 400px;
+    width: 90%;
+    text-align: center;
+    box-shadow:
+        0 40px 80px rgba(0, 0, 0, 0.45),
+        0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+}
+
+.lock-icon-wrap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 76px;
+    height: 76px;
+    border-radius: 50%;
+    background: rgba(220, 38, 38, 0.10);
+    border: 2px solid rgba(220, 38, 38, 0.30);
+    color: var(--status-crit);
+    margin: 0 auto 1.25rem;
+    animation: lock-pulse 2.8s ease-in-out infinite;
+}
+
+@keyframes lock-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.40); }
+    50%       { box-shadow: 0 0 0 16px rgba(220, 38, 38, 0); }
+}
+
+.lock-title {
+    font-family: var(--font-ui);
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 0.6rem;
+    letter-spacing: -0.01em;
+}
+
+.lock-sub {
+    font-family: var(--font-ui);
+    font-size: 0.82rem;
+    color: var(--text-label);
+    line-height: 1.6;
+    margin: 0 0 1.5rem;
+}
+
+/* ==========================================================================
+   STALE DATA WARNING BANNER
+   Shown in Live Replica Status panel when MQTT packets stop arriving.
+   ========================================================================== */
+.stale-warning {
+    background: var(--status-crit-bg, rgba(220, 38, 38, 0.08));
+    border: 1px solid var(--status-crit-border, rgba(220, 38, 38, 0.20));
+    border-radius: var(--radius-sm);
+    padding: 0.4rem 0.65rem;
+    font-family: var(--font-ui);
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--status-crit);
+    text-align: center;
+    margin-bottom: 0.65rem;
+    animation: stale-blink 1.8s ease-in-out infinite;
+}
+
+@keyframes stale-blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.35; }
+}
+
+/* ==========================================================================
+   MQTT FRESHNESS BAR
+   Green → Amber → Red as packet age approaches 3 s stale threshold.
+   ========================================================================== */
+.mqtt-freshness-bar {
+    height: 5px;
+    background: var(--border-subtle);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.mqtt-freshness-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 3px;
+    transition: width 0.7s linear, background-color 0.6s ease;
+    background: var(--status-ok);
+}
+
+/* ==========================================================================
+   SIMULATION SUSPENDED BANNER
+   Shown at top of Simulation tab left panel when MQTT hardware is connected.
+   ========================================================================== */
+.sim-suspended-banner {
+    background: var(--status-warn-bg, rgba(217, 119, 6, 0.08));
+    border: 1px solid var(--status-warn-border, rgba(217, 119, 6, 0.20));
+    border-radius: var(--radius-sm);
+    padding: 0.55rem 0.75rem;
+    font-family: var(--font-ui);
+    font-size: 0.74rem;
+    font-weight: 500;
+    color: var(--status-warn);
+    text-align: center;
+    margin: 0.5rem 0.5rem 0;
+    line-height: 1.4;
+}
+
+/* ==========================================================================
+   DISABLED CONTROL STATES
+   Hardware controls locked when MQTT disconnected.
+   Simulation controls locked when MQTT connected.
+   ========================================================================== */
+.aero-input:disabled,
+input[type="number"]:disabled,
+select:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.btn-aero:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    pointer-events: none;
+    filter: grayscale(40%);
+}
+
+/* ==========================================================================
+   NB2 CHINT BREAKER — AC POWER MONITOR
+   ========================================================================== */
+
+/* Power Monitor section — subtle accent border to distinguish from other panels */
+.nb2-power-monitor {
+    border-top: 2px solid var(--accent, #0284C7);
+    background: linear-gradient(180deg,
+        var(--accent-subtle, rgba(2, 132, 199, 0.04)) 0%,
+        transparent 40%
+    );
+    padding-top: 0.85rem;
+}
+
+.nb2-power-monitor .section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+/* Breaker State Badge — inline ON/OFF indicator */
+.nb2-state-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 0.15rem 0.5rem;
+    border-radius: var(--radius-sm);
+    min-width: 36px;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.nb2-state-on {
+    background: var(--status-ok-bg, rgba(22, 163, 74, 0.12));
+    border: 1px solid var(--status-ok-border, rgba(22, 163, 74, 0.30));
+    color: var(--status-ok, #16A34A);
+    box-shadow: 0 0 6px rgba(22, 163, 74, 0.15);
+}
+
+.nb2-state-off {
+    background: var(--status-crit-bg, rgba(220, 38, 38, 0.12));
+    border: 1px solid var(--status-crit-border, rgba(220, 38, 38, 0.30));
+    color: var(--status-crit, #DC2626);
+}
+
+.nb2-state-na {
+    background: var(--surface-inset);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-label);
+}
+
+/* Breaker Control Buttons Row */
+.nb2-control-row {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.nb2-ctrl-btn {
+    flex: 1;
+    font-size: 0.75rem !important;
+    padding: 0.4rem 0.5rem !important;
+}
+
+/* Fault / Alarm Bar */
+.nb2-fault-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-ui);
+    font-size: 0.72rem;
+    font-weight: 500;
+    background: var(--status-crit-bg, rgba(220, 38, 38, 0.08));
+    border: 1px solid var(--status-crit-border, rgba(220, 38, 38, 0.25));
+    color: var(--status-crit, #DC2626);
+    line-height: 1.3;
+}
+
+.nb2-fault-active {
+    animation: nb2-fault-pulse 2s ease-in-out infinite;
+}
+
+@keyframes nb2-fault-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.65; }
+}
+
+.nb2-fault-icon {
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+
+/* ==========================================================================
+   HARD POWER CUT BUTTON — NB2 Breaker Emergency Trip
+   Industrial danger styling: dark red background with lightning icon
+   ========================================================================== */
+.btn-hard-off {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.65rem 1rem;
+    border: 2px solid #991B1B;
+    border-radius: var(--radius-md);
+    background: linear-gradient(180deg, #7F1D1D 0%, #450A0A 100%);
+    color: #FCA5A5;
+    font-family: var(--font-ui);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-hard-off:hover:not(:disabled) {
+    background: linear-gradient(180deg, #991B1B 0%, #7F1D1D 100%);
+    border-color: #EF4444;
+    color: #FEE2E2;
+    box-shadow: 0 0 16px rgba(239, 68, 68, 0.35),
+                inset 0 0 12px rgba(239, 68, 68, 0.10);
+    transform: translateY(-1px);
+}
+
+.btn-hard-off:active:not(:disabled) {
+    transform: translateY(0);
+    background: linear-gradient(180deg, #450A0A 0%, #1C0404 100%);
+}
+
+.btn-hard-off:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    pointer-events: none;
+    filter: grayscale(60%);
+}
+
+.hard-off-icon {
+    font-size: 1.1rem;
+    filter: drop-shadow(0 0 3px rgba(239, 68, 68, 0.5));
+}
+
+.hard-off-text {
+    font-size: 0.72rem;
+}
+
+/* Status pill for NB2 warning state */
+.inspect-status-pill.status-warning {
+    background: var(--status-warn-bg, rgba(217, 119, 6, 0.12));
+    border: 1px solid var(--status-warn-border, rgba(217, 119, 6, 0.25));
+    color: var(--status-warn, #D97706);
+}
+
+/* ==========================================================================
+   #ADD CAMERA EXT — Live Camera Feed Widget
+   Positioned bottom-center of the 3D Model tab viewport.
+   Design: floating glass panel, 480x270 (16:9), collapsible.
+   ========================================================================== */
+
+/* --- Toggle Button (now uses .log-toggle pattern, no styles needed here) --- */
+
+/* --- Feed Panel — inline inside right glass panel, no absolute positioning --- */
+.camfeed-panel-section {
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+
+/* --- Viewport (video area) --- */
+.camfeed-viewport {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;   /* strict 16:9, drives height from 480px width */
+    background: #060d1a;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+/* Live feed image fills viewport with CSS zoom/pan */
+.camfeed-img {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transform-origin: center center;
+    /* default: scale(1) translate(0,0) — JS will override */
+    transform: translate(-50%, -50%) scale(1);
+    transition: transform 0.18s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Loading state */
+.camfeed-loading {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 0.75rem;
+    color: var(--text-label);
+    font-family: var(--font-ui);
+    font-size: 0.72rem;
+}
+.camfeed-spinner {
+    width: 24px; height: 24px;
+    border: 2px solid var(--border-subtle);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: cam-spin 0.8s linear infinite;
+}
+@keyframes cam-spin { to { transform: rotate(360deg); } }
+
+/* Error / unavailable state */
+.camfeed-error {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 0.5rem;
+    color: var(--text-label);
+    font-family: var(--font-ui);
+    text-align: center;
+    background: rgba(6, 13, 26, 0.72);
+}
+.camfeed-error-title {
+    font-size: 0.825rem; font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.01em;
+}
+.camfeed-error-sub { font-size: 0.68rem; color: var(--text-label); }
+
+/* --- Controls bar (zoom + D-pad) --- */
+.camfeed-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-top: 1px solid var(--border-divider);
+    gap: 1rem;
+    flex-shrink: 0;
+}
+
+/* Zoom group */
+.camfeed-zoom-group {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex: 1;
+}
+.camfeed-zoom-track {
+    flex: 1;
+    height: 3px;
+    background: var(--border-subtle);
+    border-radius: 2px;
+    position: relative;
+    overflow: hidden;
+}
+.camfeed-zoom-fill {
+    position: absolute;
+    top: 0; left: 0; height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    width: 25%;          /* JS drives this: (zoom - MIN)/(MAX - MIN) * 100% */
+    transition: width 0.15s ease;
+}
+
+/* Generic camera control button */
+.cam-ctrl-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--text-secondary);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.cam-ctrl-btn:hover  { background: var(--accent-subtle); border-color: var(--accent-muted); color: var(--accent); }
+.cam-ctrl-btn:active { transform: scale(0.92); }
+
+.cam-ctrl-btn-sm {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 22px; padding: 0 0.4rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--text-label);
+    font-family: var(--font-mono); font-size: 0.6rem; font-weight: 600;
+    cursor: pointer; flex-shrink: 0;
+    transition: background 0.12s, color 0.12s;
+}
+.cam-ctrl-btn-sm:hover { background: var(--surface-1); color: var(--text-primary); }
+
+/* D-pad grid */
+.camfeed-dpad {
+    display: grid;
+    grid-template-areas:
+        ".    up    ."
+        "left ctr   right"
+        ".    down  .";
+    grid-template-columns: 28px 28px 28px;
+    grid-template-rows:    28px 28px 28px;
+    gap: 2px;
+    flex-shrink: 0;
+}
+.dpad-btn {
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s, transform 0.08s;
+}
+.dpad-btn:hover  { background: var(--accent-subtle); border-color: var(--accent-muted); color: var(--accent); }
+.dpad-btn:active { transform: scale(0.88); background: var(--accent-subtle); }
+.dpad-up    { grid-area: up; }
+.dpad-left  { grid-area: left; }
+.dpad-right { grid-area: right; }
+.dpad-down  { grid-area: down; }
+.dpad-center {
+    grid-area: ctr;
+    width: 100%; height: 100%;
+    background: var(--surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    pointer-events: none;
+}
+
+/* ==========================================================================
+   NB2 SOFTWARE UNLOCK BUTTON
+   ========================================================================== */
+.nb2-unlock-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.nb2-unlock-btn {
+    flex: 1;
+    font-size: 0.78rem;
+    padding: 0.35rem 0.65rem;
+    height: 32px;
+    border: 1px solid var(--status-warn-border);
+    color: var(--status-warn);
+    background: var(--status-warn-bg);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-family: var(--font-ui);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    transition: background 0.15s, box-shadow 0.15s, transform 0.08s;
+}
+.nb2-unlock-btn:hover:not(:disabled) {
+    background: rgba(217, 119, 6, 0.16);
+    box-shadow: 0 0 0 2px var(--status-warn-border);
+}
+.nb2-unlock-btn:active:not(:disabled) { transform: scale(0.96); }
+.nb2-unlock-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Unlocked state — green glow pulse */
+.nb2-unlock-btn.unlocked {
+    border-color: var(--status-ok-border);
+    color: var(--status-ok);
+    background: var(--status-ok-bg);
+    animation: nb2-unlock-pulse 1.4s ease-in-out infinite;
+}
+@keyframes nb2-unlock-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.0); }
+    50%       { box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.25); }
+}
+
+.nb2-unlock-badge {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 0.15rem 0.5rem;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+    transition: background 0.2s, color 0.2s;
+}
+.nb2-unlock-badge.locked {
+    background: var(--status-crit-bg);
+    color: var(--status-crit);
+    border: 1px solid var(--status-crit-border);
+}
+.nb2-unlock-badge.unlocked {
+    background: var(--status-ok-bg);
+    color: var(--status-ok);
+    border: 1px solid var(--status-ok-border);
+}
+
+.nb2-unlock-countdown {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--status-ok);
+    background: var(--status-ok-bg);
+    border: 1px solid var(--status-ok-border);
+    border-radius: var(--radius-sm);
+    padding: 0.2rem 0.5rem;
+    margin-top: 0.35rem;
+    text-align: center;
+    animation: nb2-countdown-fade 0.3s ease;
+}
+@keyframes nb2-countdown-fade {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}

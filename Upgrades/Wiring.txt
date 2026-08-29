@@ -1,0 +1,85 @@
+إليك المخطط الهندسي للتوصيل، مصنفاً حسب الدوائر الوظيفية وبالصيغة الدقيقة التي طلبتها:
+
+**دائرة الطاقة وتوحيد الأرضي (Power & Common Ground)**
+{Power Supply 12V : V+ > IN in (ATC Fuse Holder)}
+{ATC Fuse Holder : OUT > B+ in (BTS7960 Motor Driver)}
+{Power Supply 12V : V- (GND) > B- in (BTS7960 Motor Driver)}
+{Power Supply 12V : V- (GND) > GND in (ESP32 WROOM-32)}
+{Power Supply 12V : V- (GND) > Blue Wire (GND) in (E3F-DS30C4 Sensor)}
+{Power Supply 12V : V- (GND) > GND (Input Side) in (PC817 Optocoupler Board)}
+
+**دائرة قيادة المحرك (Motor Drive Control)**
+{BTS7960 Motor Driver : M+ > Motor Positive Terminal in (JGB37-555 Motor)}
+{BTS7960 Motor Driver : M- > Motor Negative Terminal in (JGB37-555 Motor)}
+{ESP32 WROOM-32 : 3V3 > VCC in (BTS7960 Motor Driver)}
+{ESP32 WROOM-32 : GND > GND in (BTS7960 Motor Driver)}
+{ESP32 WROOM-32 : 3V3 > R_EN in (BTS7960 Motor Driver)}
+{ESP32 WROOM-32 : 3V3 > L_EN in (BTS7960 Motor Driver)}
+{ESP32 WROOM-32 : D18 > RPWM in (BTS7960 Motor Driver)}
+{ESP32 WROOM-32 : D19 > LPWM in (BTS7960 Motor Driver)}
+
+**دائرة التشفير وقياس السرعة (Encoder & Telemetry)**
+{ESP32 WROOM-32 : 3V3 > VCC in (JGB37-555 Encoder)}
+{ESP32 WROOM-32 : GND > GND in (JGB37-555 Encoder)}
+{JGB37-555 Encoder : Phase A > D34 in (ESP32 WROOM-32)}
+{JGB37-555 Encoder : Phase B > D35 in (ESP32 WROOM-32)}
+
+**دائرة حساس التقارب والعزل البصري (Proximity Sensor & Isolation)**
+{Power Supply 12V : V+ > Brown Wire (VCC) in (E3F-DS30C4 Sensor)}
+{E3F-DS30C4 Sensor : Black Wire (OUT) > IN1 in (PC817 Optocoupler Board)}
+{ESP32 WROOM-32 : 3V3 > VCC (Output Side) in (PC817 Optocoupler Board)}
+{ESP32 WROOM-32 : GND > GND (Output Side) in (PC817 Optocoupler Board)}
+{PC817 Optocoupler Board : OUT1 > D4 in (ESP32 WROOM-32)}
+
+
+___
+Power Adapter 
+Red > Proximty NPN NO semsor , B+ 
+GND > Esp , proximity npn no , B-
+---
+Proximty Sensor : 
+Blue > GND 
+Black > G1"Opto" 
+Brown > 12V 
+---
+  (Motor Drive Control)
+{BTS7960 Motor Driver : M+ > Motor Positive Terminal in (JGB37-555 Motor)}
+{BTS7960 Motor Driver : M- > Motor Negative Terminal in (JGB37-555 Motor)}
+{ESP32 WROOM-32 : 3V3 > VCC in (BTS7960 Motor Driver)}
+{ESP32 WROOM-32 : GND > GND in (BTS7960 Motor Driver)}
+{ESP32 WROOM-32 : 3V3 > R_EN in (BTS7960 Motor Driver)}
+{ESP32 WROOM-32 : 3V3 > L_EN in (BTS7960 Motor Driver)}
+{ESP32 WROOM-32 : D18 > RPWM in (BTS7960 Motor Driver)}
+{ESP32 WROOM-32 : D19 > LPWM in (BTS7960 Motor Driver)}
+---
+PC817 
+GND > Black NPN NO 
+IN1> 12V
+V1 > D25 
+G > ESP GND
+---
+Encoder 
+blue to 3.3v esp 
+green > gnd to esp 
+yellow > d34 
+white > d35
+---
+[16/07, 10:04 am] جهاد بن ماجد: E18 CONNECTION 
+BROWN 5V 
+BLUE GND ESP
+BLACK GPIO4 
+R 10K BETWEEN BLACK AND 3.3V
+[16/07, 10:31 am] جهاد بن ماجد: DS CONNECTION 
+BROWN 3.3V
+GND ESP
+GPIO 16
+[16/07, 1:39 pm] جهاد بن ماجد: R10K PARELL  BETWEEN DATA AND 3.3
+---
+rs485 
+vcc 3.3 
+gnd 
+a and b 
+rx 26
+tx 27
+en23
+

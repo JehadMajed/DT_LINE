@@ -1,0 +1,1348 @@
+[
+  {
+    "id": "tab_devxx_control_v4",
+    "type": "tab",
+    "label": "DEVXX Breaker Control v4",
+    "disabled": false,
+    "info": "v4: Optimistic health start, dispatch collision guard, phase watchdog, overnight windows, node.status on all nodes, Change nodes instead of single-line functions. Replace 'devxx' entity IDs with your device."
+  },
+  {
+    "id": "server_devxx_ha",
+    "type": "server",
+    "name": "Home Assistant",
+    "version": 6,
+    "addon": true,
+    "rejectUnauthorizedCerts": true,
+    "ha_boolean": [
+      "y",
+      "yes",
+      "true",
+      "on",
+      "home",
+      "open"
+    ],
+    "connectionDelay": true,
+    "cacheJson": true,
+    "heartbeat": true,
+    "heartbeatInterval": 30,
+    "areaSelector": "friendlyName",
+    "deviceSelector": "friendlyName",
+    "entitySelector": "friendlyName",
+    "statusSeparator": ": ",
+    "statusYear": "hidden",
+    "statusMonth": "short",
+    "statusDay": "numeric",
+    "statusHourCycle": "default",
+    "statusTimeFormat": "h:m",
+    "enableGlobalContextStore": false
+  },
+  {
+    "id": "c_init",
+    "type": "comment",
+    "z": "tab_devxx_control_v4",
+    "name": "LAYER: Policy & Schedule (init on deploy)",
+    "info": "",
+    "x": 140,
+    "y": 20,
+    "wires": []
+  },
+  {
+    "id": "c_boot",
+    "type": "comment",
+    "z": "tab_devxx_control_v4",
+    "name": "LAYER: Boot (read breaker state on startup)",
+    "info": "",
+    "x": 140,
+    "y": 180,
+    "wires": []
+  },
+  {
+    "id": "c_scenario",
+    "type": "comment",
+    "z": "tab_devxx_control_v4",
+    "name": "LAYER: Scenario Engine (60s tick evaluates desired state)",
+    "info": "",
+    "x": 140,
+    "y": 250,
+    "wires": []
+  },
+  {
+    "id": "c_feedback",
+    "type": "comment",
+    "z": "tab_devxx_control_v4",
+    "name": "LAYER: Feedback (instant + 5min stall + boot)",
+    "info": "",
+    "x": 140,
+    "y": 340,
+    "wires": []
+  },
+  {
+    "id": "c_manual",
+    "type": "comment",
+    "z": "tab_devxx_control_v4",
+    "name": "LAYER: Manual Controls (reconcile + reset)",
+    "info": "",
+    "x": 140,
+    "y": 480,
+    "wires": []
+  },
+  {
+    "id": "c_coord",
+    "type": "comment",
+    "z": "tab_devxx_control_v4",
+    "name": "COORDINATOR: Single phase owner. All decisions here.",
+    "info": "",
+    "x": 940,
+    "y": 290,
+    "wires": []
+  },
+  {
+    "id": "c_dispatch",
+    "type": "comment",
+    "z": "tab_devxx_control_v4",
+    "name": "LAYER: Dispatch (unlock → delay → command)",
+    "info": "",
+    "x": 1430,
+    "y": 180,
+    "wires": []
+  },
+  {
+    "id": "c_verify",
+    "type": "comment",
+    "z": "tab_devxx_control_v4",
+    "name": "LAYER: Verify (policy-driven delay → read → confirm)",
+    "info": "",
+    "x": 2310,
+    "y": 230,
+    "wires": []
+  },
+  {
+    "id": "c_audit",
+    "type": "comment",
+    "z": "tab_devxx_control_v4",
+    "name": "LAYER: Audit (dual journals: expected + actual)",
+    "info": "",
+    "x": 1180,
+    "y": 530,
+    "wires": []
+  },
+  {
+    "id": "c_catch",
+    "type": "comment",
+    "z": "tab_devxx_control_v4",
+    "name": "CATCH: Scoped to svc_unlock_open/close, svc_open/close, cur_boot_breaker, cur_breaker",
+    "info": "",
+    "x": 140,
+    "y": 620,
+    "wires": []
+  },
+  {
+    "id": "inj_policy",
+    "type": "inject",
+    "z": "tab_devxx_control_v4",
+    "name": "Init Policy",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "0.5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 130,
+    "y": 60,
+    "wires": [
+      [
+        "fn_policy"
+      ]
+    ]
+  },
+  {
+    "id": "fn_policy",
+    "type": "function",
+    "z": "tab_devxx_control_v4",
+    "name": "Load Policy Defaults",
+    "func": "const policy = {\n  timezone: 'Asia/Riyadh',\n  verifyAfterMs: 8000,\n  unlockDelayMs: 600,\n  retryDelaysSec: [5, 15, 60, 180, 300],\n  keepRetrying: true,\n  guardianStallMinutes: 5,\n  journalLimit: 500,\n  alarmPolicy: {\n    enabled: false,\n    maxAttempts: null,\n    maxMismatchMinutes: null\n  }\n};\nflow.set('devxx_policy', policy);\nnode.status({fill:'green',shape:'dot',text:'Policy loaded'});\nmsg.auditRecord = {\n  ts: Date.now(), deviceId: 'DEVXX', channel: 'actual',\n  sourceLayer: 'policy', eventType: 'policy_loaded',\n  phase: 'boot', desiredMode: null, requiredBreakerState: null,\n  actualBreakerState: null, healthMode: null,\n  ticketId: null, attemptNo: 0, result: 'ok', reasonCode: 'policy_initialized'\n};\nreturn [null, msg];",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "flow.set('devxx_state', null); flow.set('devxx_schedule', null);",
+    "finalize": "",
+    "libs": [],
+    "x": 360,
+    "y": 60,
+    "wires": [
+      [],
+      [
+        "fn_audit"
+      ]
+    ]
+  },
+  {
+    "id": "inj_schedule",
+    "type": "inject",
+    "z": "tab_devxx_control_v4",
+    "name": "Load CSV Schedule",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "1",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 140,
+    "y": 130,
+    "wires": [
+      [
+        "tpl_csv"
+      ]
+    ]
+  },
+  {
+    "id": "tpl_csv",
+    "type": "template",
+    "z": "tab_devxx_control_v4",
+    "name": "Window CSV Schedule",
+    "field": "payload",
+    "fieldType": "msg",
+    "format": "handlebars",
+    "syntax": "mustache",
+    "template": "Day,Start,End,Enabled,Mode\nmonday,07:00,09:00,1,run\ntuesday,07:00,09:00,1,run\nwednesday,07:00,09:00,1,run\nthursday,07:00,09:00,1,run\nfriday,07:00,09:00,1,run\nsaturday,07:00,09:00,1,run\nsunday,07:00,09:00,1,run",
+    "output": "str",
+    "x": 380,
+    "y": 130,
+    "wires": [
+      [
+        "csv_windows"
+      ]
+    ]
+  },
+  {
+    "id": "csv_windows",
+    "type": "csv",
+    "z": "tab_devxx_control_v4",
+    "name": "CSV → Rows",
+    "sep": ",",
+    "hdrin": true,
+    "hdrout": "none",
+    "multi": "mult",
+    "ret": "\n",
+    "temp": "",
+    "skip": "0",
+    "strings": true,
+    "include_empty_strings": true,
+    "include_null_values": false,
+    "x": 590,
+    "y": 130,
+    "wires": [
+      [
+        "fn_norm_windows"
+      ]
+    ]
+  },
+  {
+    "id": "fn_norm_windows",
+    "type": "function",
+    "z": "tab_devxx_control_v4",
+    "name": "Normalize & Save Windows",
+    "func": "const rows = Array.isArray(msg.payload) ? msg.payload : [msg.payload];\nconst out = [];\nfor (const row of rows) {\n  if (!row || String(row.Enabled || '0') !== '1') continue;\n  const day = String(row.Day || '').trim().toLowerCase();\n  const start = String(row.Start || '').trim();\n  const end = String(row.End || '').trim();\n  const mode = String(row.Mode || 'run').trim().toLowerCase();\n  if (!day || !start || !end) continue;\n  out.push({ id: `${day}_${start}_${end}_${mode}`, day, start, end, mode, enabled: true });\n}\nflow.set('devxx_schedule', out);\nnode.status({fill:'green',shape:'dot',text:`${out.length} windows loaded`});\nmsg.auditRecord = {\n  ts: Date.now(), deviceId: 'DEVXX', channel: 'expected',\n  sourceLayer: 'scenario', eventType: 'schedule_translated',\n  phase: (flow.get('devxx_state') || {}).phase || 'boot',\n  desiredMode: null, requiredBreakerState: null,\n  actualBreakerState: null, healthMode: null,\n  ticketId: null, attemptNo: 0,\n  result: `windows:${out.length}`, reasonCode: 'csv_to_canonical'\n};\nreturn [null, {auditRecord: msg.auditRecord}];",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 830,
+    "y": 130,
+    "wires": [
+      [],
+      [
+        "fn_audit"
+      ]
+    ]
+  },
+  {
+    "id": "inj_boot",
+    "type": "inject",
+    "z": "tab_devxx_control_v4",
+    "name": "Boot Read Breaker",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "2",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 150,
+    "y": 210,
+    "wires": [
+      [
+        "cur_boot_breaker"
+      ]
+    ]
+  },
+  {
+    "id": "cur_boot_breaker",
+    "type": "api-current-state",
+    "z": "tab_devxx_control_v4",
+    "name": "Read Breaker on Boot",
+    "server": "server_devxx_ha",
+    "version": 3,
+    "outputs": 1,
+    "halt_if": "",
+    "halt_if_type": "str",
+    "halt_if_compare": "is",
+    "entity_id": "binary_sensor.esps3_devxx_nb2_status",
+    "state_type": "str",
+    "blockInputOverrides": false,
+    "outputProperties": [
+      {
+        "property": "payload",
+        "propertyType": "msg",
+        "value": "string",
+        "valueType": "entityState"
+      },
+      {
+        "property": "data",
+        "propertyType": "msg",
+        "value": "",
+        "valueType": "entity"
+      }
+    ],
+    "for": "0",
+    "forType": "num",
+    "forUnits": "minutes",
+    "override_topic": false,
+    "state_location": "payload",
+    "override_payload": "merge",
+    "entity_location": "data",
+    "override_data": "merge",
+    "x": 390,
+    "y": 210,
+    "wires": [
+      [
+        "chg_mark_boot"
+      ]
+    ]
+  },
+  {
+    "id": "chg_mark_boot",
+    "type": "change",
+    "z": "tab_devxx_control_v4",
+    "name": "Mark: boot_read",
+    "rules": [
+      {
+        "t": "set",
+        "p": "guardianSource",
+        "pt": "msg",
+        "to": "boot_read",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 610,
+    "y": 210,
+    "wires": [
+      [
+        "fn_breaker_classify"
+      ]
+    ]
+  },
+  {
+    "id": "inj_tick",
+    "type": "inject",
+    "z": "tab_devxx_control_v4",
+    "name": "Scenario Tick (60s)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "60",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "4",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 150,
+    "y": 290,
+    "wires": [
+      [
+        "fn_desired"
+      ]
+    ]
+  },
+  {
+    "id": "fn_desired",
+    "type": "function",
+    "z": "tab_devxx_control_v4",
+    "name": "Scenario Engine: Desired Now",
+    "func": "const policy = flow.get('devxx_policy') || { timezone: 'Asia/Riyadh' };\nconst schedule = flow.get('devxx_schedule') || [];\nconst now = new Date();\nconst local = new Date(now.toLocaleString('en-US', { timeZone: policy.timezone || 'Asia/Riyadh' }));\nconst dayNames = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];\nconst currentDay = dayNames[local.getDay()];\nconst nowMin = local.getHours() * 60 + local.getMinutes();\nconst timeStr = String(local.getHours()).padStart(2,'0') + ':' + String(local.getMinutes()).padStart(2,'0');\n\nlet activeWindow = null;\nfor (const w of schedule) {\n  if (!w.enabled || w.day !== currentDay) continue;\n  const [sh, sm] = String(w.start).split(':').map(v => parseInt(v, 10));\n  const [eh, em] = String(w.end).split(':').map(v => parseInt(v, 10));\n  const startMin = sh * 60 + sm;\n  const endMin = eh * 60 + em;\n  // Overnight window support: 23:00-01:00\n  let match;\n  if (startMin <= endMin) {\n    match = nowMin >= startMin && nowMin < endMin;\n  } else {\n    match = nowMin >= startMin || nowMin < endMin;\n  }\n  if (match) { activeWindow = w; break; }\n}\n\nmsg.kind = 'desired_update';\nmsg.desiredModeNow = activeWindow ? (activeWindow.mode || 'run') : 'off';\nmsg.requiredBreakerState = msg.desiredModeNow === 'run' ? 'closed' : 'open';\nmsg.activeWindowId = activeWindow ? activeWindow.id : null;\n\nnode.status({fill:'blue',shape:'dot',text:`${currentDay} ${timeStr} → ${msg.desiredModeNow}`});\n\nconst state = flow.get('devxx_state') || {};\nconst audit = {\n  ts: Date.now(), deviceId: 'DEVXX', channel: 'expected',\n  sourceLayer: 'scenario', eventType: 'desired_evaluated',\n  phase: state.phase || 'boot',\n  desiredMode: msg.desiredModeNow,\n  requiredBreakerState: msg.requiredBreakerState,\n  actualBreakerState: state.actualBreakerState || null,\n  healthMode: state.healthMode || null,\n  ticketId: (state.ticket || {}).id || null,\n  attemptNo: (state.ticket || {}).attemptCount || 0,\n  result: msg.activeWindowId || 'outside_window',\n  reasonCode: 'scenario_eval'\n};\nreturn [msg, {auditRecord: audit}];",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 290,
+    "wires": [
+      [
+        "fn_coordinator"
+      ],
+      [
+        "fn_audit"
+      ]
+    ]
+  },
+  {
+    "id": "evt_instant",
+    "type": "server-state-changed",
+    "z": "tab_devxx_control_v4",
+    "name": "Breaker State Instant",
+    "server": "server_devxx_ha",
+    "version": 6,
+    "outputs": 1,
+    "exposeAsEntityConfig": "",
+    "entities": {
+      "entity": [
+        "binary_sensor.esps3_devxx_nb2_status"
+      ],
+      "substring": [],
+      "regex": []
+    },
+    "outputInitially": false,
+    "stateType": "str",
+    "ifState": "",
+    "ifStateType": "str",
+    "ifStateOperator": "is",
+    "outputOnlyOnStateChange": true,
+    "for": "0",
+    "forType": "num",
+    "forUnits": "minutes",
+    "ignorePrevStateNull": false,
+    "ignorePrevStateUnknown": false,
+    "ignorePrevStateUnavailable": false,
+    "ignoreCurrentStateUnknown": false,
+    "ignoreCurrentStateUnavailable": false,
+    "outputProperties": [
+      {
+        "property": "payload",
+        "propertyType": "msg",
+        "value": "string",
+        "valueType": "entityState"
+      },
+      {
+        "property": "data",
+        "propertyType": "msg",
+        "value": "",
+        "valueType": "entity"
+      }
+    ],
+    "x": 170,
+    "y": 390,
+    "wires": [
+      [
+        "chg_mark_instant"
+      ]
+    ]
+  },
+  {
+    "id": "chg_mark_instant",
+    "type": "change",
+    "z": "tab_devxx_control_v4",
+    "name": "Mark: instant",
+    "rules": [
+      {
+        "t": "set",
+        "p": "guardianSource",
+        "pt": "msg",
+        "to": "instant",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 400,
+    "y": 390,
+    "wires": [
+      [
+        "fn_breaker_classify"
+      ]
+    ]
+  },
+  {
+    "id": "evt_stall",
+    "type": "server-state-changed",
+    "z": "tab_devxx_control_v4",
+    "name": "Breaker Stall Watch (5m)",
+    "server": "server_devxx_ha",
+    "version": 6,
+    "outputs": 1,
+    "exposeAsEntityConfig": "",
+    "entities": {
+      "entity": [
+        "binary_sensor.esps3_devxx_nb2_status"
+      ],
+      "substring": [],
+      "regex": []
+    },
+    "outputInitially": false,
+    "stateType": "str",
+    "ifState": "",
+    "ifStateType": "str",
+    "ifStateOperator": "is",
+    "outputOnlyOnStateChange": false,
+    "for": "5",
+    "forType": "num",
+    "forUnits": "minutes",
+    "ignorePrevStateNull": false,
+    "ignorePrevStateUnknown": false,
+    "ignorePrevStateUnavailable": false,
+    "ignoreCurrentStateUnknown": false,
+    "ignoreCurrentStateUnavailable": false,
+    "outputProperties": [
+      {
+        "property": "payload",
+        "propertyType": "msg",
+        "value": "string",
+        "valueType": "entityState"
+      },
+      {
+        "property": "data",
+        "propertyType": "msg",
+        "value": "",
+        "valueType": "entity"
+      }
+    ],
+    "x": 180,
+    "y": 450,
+    "wires": [
+      [
+        "chg_mark_stall"
+      ]
+    ]
+  },
+  {
+    "id": "chg_mark_stall",
+    "type": "change",
+    "z": "tab_devxx_control_v4",
+    "name": "Mark: stall_watch",
+    "rules": [
+      {
+        "t": "set",
+        "p": "guardianSource",
+        "pt": "msg",
+        "to": "stall_watch",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 400,
+    "y": 450,
+    "wires": [
+      [
+        "fn_breaker_classify"
+      ]
+    ]
+  },
+  {
+    "id": "fn_breaker_classify",
+    "type": "function",
+    "z": "tab_devxx_control_v4",
+    "name": "Feedback: Classify Breaker",
+    "func": "// Normalize HA state to open/closed/unknown\n// ⚠ DUPLICATED: also in fn_verify. Keep in sync.\nfunction normalize(raw) {\n  const s = String(raw).toLowerCase().trim();\n  if (s === 'unavailable' || s === 'unknown' || s === 'null' || s === '') return 'unknown';\n  if (s === 'on' || s === 'true' || s === 'open') return 'open';\n  if (s === 'off' || s === 'false' || s === 'closed') return 'closed';\n  return 'unknown';\n}\nconst actual = normalize(msg.payload);\nmsg.kind = 'breaker_event';\nmsg.actualBreakerState = actual;\n\nnode.status({fill: actual === 'unknown' ? 'red' : 'green', shape:'dot', text: actual + ' (' + (msg.guardianSource||'event') + ')'});\n\nconst state = flow.get('devxx_state') || {};\nmsg.auditRecord = {\n  ts: Date.now(), deviceId: 'DEVXX', channel: 'actual',\n  sourceLayer: 'feedback', eventType: 'breaker_event',\n  phase: state.phase || 'boot',\n  desiredMode: state.desiredModeNow || null,\n  requiredBreakerState: state.requiredBreakerState || null,\n  actualBreakerState: actual,\n  healthMode: actual === 'unknown' ? 'comm_lost' : 'healthy',\n  ticketId: (state.ticket || {}).id || null,\n  attemptNo: (state.ticket || {}).attemptCount || 0,\n  result: msg.guardianSource || 'event',\n  reasonCode: actual === 'unknown' ? 'feedback_unknown' : 'feedback_seen'\n};\nreturn [msg, {auditRecord: msg.auditRecord}];",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 680,
+    "y": 410,
+    "wires": [
+      [
+        "fn_coordinator"
+      ],
+      [
+        "fn_audit"
+      ]
+    ]
+  },
+  {
+    "id": "inj_reconcile",
+    "type": "inject",
+    "z": "tab_devxx_control_v4",
+    "name": "Manual Reconcile",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "0.1",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 150,
+    "y": 520,
+    "wires": [
+      [
+        "chg_reconcile"
+      ]
+    ]
+  },
+  {
+    "id": "chg_reconcile",
+    "type": "change",
+    "z": "tab_devxx_control_v4",
+    "name": "Set: manual_reconcile",
+    "rules": [
+      {
+        "t": "set",
+        "p": "kind",
+        "pt": "msg",
+        "to": "manual_reconcile",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 380,
+    "y": 520,
+    "wires": [
+      [
+        "fn_coordinator"
+      ]
+    ]
+  },
+  {
+    "id": "inj_reset",
+    "type": "inject",
+    "z": "tab_devxx_control_v4",
+    "name": "⚠ Manual Reset State",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "0.1",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 160,
+    "y": 570,
+    "wires": [
+      [
+        "chg_reset"
+      ]
+    ]
+  },
+  {
+    "id": "chg_reset",
+    "type": "change",
+    "z": "tab_devxx_control_v4",
+    "name": "Set: manual_reset",
+    "rules": [
+      {
+        "t": "set",
+        "p": "kind",
+        "pt": "msg",
+        "to": "manual_reset",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 380,
+    "y": 570,
+    "wires": [
+      [
+        "fn_coordinator"
+      ]
+    ]
+  },
+  {
+    "id": "fn_coordinator",
+    "type": "function",
+    "z": "tab_devxx_control_v4",
+    "name": "⚙ Coordinator / State Machine v4",
+    "func": "// ================================================================\n// COORDINATOR / STATE MACHINE v4\n// Single phase owner. All decisions flow through this node.\n// KEY FIX from v3: Starts with healthMode 'healthy' (optimistic).\n// Only degrades to comm_lost on evidence (unknown feedback).\n// ================================================================\n\nconst policy = flow.get('devxx_policy') || {\n  retryDelaysSec: [5,15,60,180,300], keepRetrying: true,\n  alarmPolicy: {enabled:false, maxAttempts:null, maxMismatchMinutes:null}\n};\n\nlet state = flow.get('devxx_state');\nif (!state) {\n  state = {\n    deviceId: 'DEVXX',\n    desiredModeNow: 'off',\n    requiredBreakerState: 'open',\n    activeWindowId: null,\n    actualBreakerState: 'unknown',\n    phase: 'boot',\n    healthMode: 'healthy',    // ← OPTIMISTIC START (v3 used 'uncertain' which blocked everything)\n    recoveryMode: 'idle',\n    ticket: null,\n    lastConfirmedAt: null,\n    lastObservedAt: null,\n    lastDecisionReason: 'init',\n    lastErrorClass: null,\n    mismatchSince: null,\n    lastStallHandledAt: null\n  };\n}\n\nfunction save() { flow.set('devxx_state', state); }\nfunction tid() { return 't_' + Date.now(); }\n\nfunction updateStatus() {\n  const colors = {\n    'steady_ok':'green','boot':'grey','comm_lost':'red',\n    'dispatching_open':'yellow','dispatching_close':'yellow',\n    'verifying_open':'blue','verifying_close':'blue',\n    'retry_backoff_open':'yellow','retry_backoff_close':'yellow',\n    'reconciling':'blue','alarm':'red','steady_mismatch':'red'\n  };\n  const ti = state.ticket ? `T#${state.ticket.attemptCount}` : 'no-ticket';\n  node.status({\n    fill: colors[state.phase] || 'grey',\n    shape: state.ticket ? 'ring' : 'dot',\n    text: `${state.phase} | act:${state.actualBreakerState} req:${state.requiredBreakerState} | ${state.healthMode} | ${ti}`\n  });\n}\n\nfunction audit(sl, et, result, rc) {\n  return {\n    ts: Date.now(), deviceId: 'DEVXX', channel: 'actual',\n    sourceLayer: sl, eventType: et, phase: state.phase,\n    desiredMode: state.desiredModeNow,\n    requiredBreakerState: state.requiredBreakerState,\n    actualBreakerState: state.actualBreakerState,\n    healthMode: state.healthMode,\n    ticketId: (state.ticket||{}).id||null,\n    attemptNo: (state.ticket||{}).attemptCount||0,\n    result, reasonCode: rc\n  };\n}\n\nfunction nextDelay(n) {\n  const l = (policy.retryDelaysSec && policy.retryDelaysSec.length) ? policy.retryDelaysSec : [5,15,60,180,300];\n  return Number(l[Math.min(Math.max(n-1,0), l.length-1)]) || 5;\n}\n\nfunction alarmReached() {\n  const ap = policy.alarmPolicy || {};\n  if (!ap.enabled) return false;\n  if (ap.maxAttempts != null && state.ticket && state.ticket.attemptCount >= Number(ap.maxAttempts)) return true;\n  if (ap.maxMismatchMinutes != null && state.mismatchSince && (Date.now()-state.mismatchSince)/60000 >= Number(ap.maxMismatchMinutes)) return true;\n  return false;\n}\n\nfunction openTicket(source) {\n  if (!state.ticket) {\n    state.ticket = { id:tid(), requestedBreakerState:state.requiredBreakerState, sourceLayer:source, attemptCount:0, createdAt:Date.now(), lastAttemptAt:null, status:'planned' };\n  } else {\n    state.ticket.requestedBreakerState = state.requiredBreakerState;\n    state.ticket.sourceLayer = source;\n  }\n}\n\nfunction makeDispatch(source) {\n  openTicket(source);\n  state.ticket.attemptCount += 1;\n  state.ticket.status = 'dispatching';\n  state.ticket.lastAttemptAt = Date.now();\n  state.phase = state.requiredBreakerState === 'open' ? 'dispatching_open' : 'dispatching_close';\n  state.lastDecisionReason = 'dispatch_' + state.requiredBreakerState;\n  if (!state.mismatchSince) state.mismatchSince = Date.now();\n  save();\n  return {\n    kind:'dispatch_request',\n    command: state.requiredBreakerState === 'open' ? 'open' : 'close',\n    ticketId: state.ticket.id,\n    attemptNo: state.ticket.attemptCount,\n    requestedBreakerState: state.requiredBreakerState\n  };\n}\n\nfunction clearOK() {\n  if (state.ticket) state.ticket.status = 'confirmed';\n  state.ticket = null;\n  state.phase = 'steady_ok';\n  state.lastConfirmedAt = Date.now();\n  state.lastErrorClass = null;\n  state.mismatchSince = null;\n  state.recoveryMode = 'idle';\n}\n\nfunction holdMM() {\n  state.phase = 'steady_mismatch';\n  if (!state.mismatchSince) state.mismatchSince = Date.now();\n}\n\n// ==================== DESIRED UPDATE ====================\nif (msg.kind === 'desired_update') {\n  state.desiredModeNow = msg.desiredModeNow;\n  state.requiredBreakerState = msg.requiredBreakerState;\n  state.activeWindowId = msg.activeWindowId;\n\n  // DISPATCH COLLISION GUARD\n  if (state.ticket && state.ticket.status !== 'confirmed' && state.ticket.requestedBreakerState !== state.requiredBreakerState) {\n    state.ticket.status = 'superseded';\n    state.ticket = null;\n    const d = makeDispatch('scenario_direction_change');\n    updateStatus();\n    return [d, {auditRecord:audit('coordinator','ticket_superseded','dispatch','direction_reversal')}, {payload:state,kind:'state_snapshot'}];\n  }\n\n  if (state.healthMode === 'comm_lost') {\n    holdMM(); updateStatus(); save();\n    return [null, {auditRecord:audit('coordinator','desired_held','held','comm_lost')}, {payload:state,kind:'state_snapshot'}];\n  }\n\n  if (state.actualBreakerState === state.requiredBreakerState) {\n    clearOK(); updateStatus(); save();\n    return [null, {auditRecord:audit('coordinator','desired_satisfied','ok','match')}, {payload:state,kind:'state_snapshot'}];\n  }\n\n  const d = makeDispatch('scenario');\n  updateStatus();\n  return [d, {auditRecord:audit('coordinator','ticket_opened','dispatch','scenario_change')}, {payload:state,kind:'state_snapshot'}];\n}\n\n// ==================== BREAKER EVENT ====================\nif (msg.kind === 'breaker_event') {\n  state.actualBreakerState = msg.actualBreakerState;\n  state.lastObservedAt = Date.now();\n\n  if (msg.actualBreakerState === 'unknown') {\n    state.phase = 'comm_lost';\n    state.healthMode = 'comm_lost';\n    state.lastErrorClass = 'feedback_unknown';\n    updateStatus(); save();\n    return [null, {auditRecord:audit('coordinator','health_comm_lost','comm_lost','feedback_unknown')}, {payload:state,kind:'state_snapshot'}];\n  }\n\n  state.healthMode = 'healthy';\n\n  // Recovery from comm_lost\n  if (state.phase === 'comm_lost' || state.recoveryMode === 'reconcile_pending') {\n    state.recoveryMode = 'active';\n    state.phase = 'reconciling';\n    if (state.actualBreakerState === state.requiredBreakerState) {\n      clearOK(); updateStatus(); save();\n      return [null, {auditRecord:audit('coordinator','reconcile_ok','ok','compliant')}, {payload:state,kind:'state_snapshot'}];\n    }\n    const d = makeDispatch('reconcile');\n    updateStatus();\n    return [d, {auditRecord:audit('coordinator','reconcile_dispatch','dispatch','mismatch_after_restore')}, {payload:state,kind:'state_snapshot'}];\n  }\n\n  if (state.actualBreakerState === state.requiredBreakerState) {\n    clearOK(); updateStatus(); save();\n    return [null, {auditRecord:audit('coordinator','state_match','ok','match')}, {payload:state,kind:'state_snapshot'}];\n  }\n\n  if (!state.ticket && state.requiredBreakerState) {\n    // Stall debounce\n    if (msg.guardianSource === 'stall_watch') {\n      if (state.lastStallHandledAt && (Date.now() - state.lastStallHandledAt) < 300000) {\n        holdMM(); updateStatus(); save();\n        return [null, {auditRecord:audit('coordinator','stall_debounced','skip','recent')}, {payload:state,kind:'state_snapshot'}];\n      }\n      state.lastStallHandledAt = Date.now();\n    }\n    const d = makeDispatch(msg.guardianSource === 'stall_watch' ? 'guardian_stall' : 'guardian');\n    updateStatus();\n    return [d, {auditRecord:audit('coordinator','guardian_correction','dispatch','mismatch')}, {payload:state,kind:'state_snapshot'}];\n  }\n\n  holdMM(); updateStatus(); save();\n  return [null, {auditRecord:audit('coordinator','mismatch_wait','wait','ticket_active')}, {payload:state,kind:'state_snapshot'}];\n}\n\n// ==================== DISPATCH ACK ====================\nif (msg.kind === 'dispatch_ack') {\n  if (!state.ticket || msg.ticketId !== state.ticket.id) {\n    updateStatus(); save();\n    return [null, {auditRecord:audit('coordinator','ack_ignored','ignored','ticket_mismatch')}, {payload:state,kind:'state_snapshot'}];\n  }\n  state.ticket.status = 'awaiting_feedback';\n  state.phase = state.ticket.requestedBreakerState === 'open' ? 'verifying_open' : 'verifying_close';\n  updateStatus(); save();\n  return [null, {auditRecord:audit('coordinator','dispatch_ack','verifying','started')}, {payload:state,kind:'state_snapshot'}];\n}\n\n// ==================== DISPATCH ERROR ====================\nif (msg.kind === 'dispatch_error') {\n  state.lastErrorClass = 'dispatch_error';\n  if (!state.ticket) { updateStatus(); save(); return [null, {auditRecord:audit('coordinator','error_no_ticket','ignored','no_ticket')}, {payload:state,kind:'state_snapshot'}]; }\n  if (alarmReached() || !policy.keepRetrying) {\n    state.phase = 'alarm'; state.ticket.status = 'alarm'; updateStatus(); save();\n    return [null, {auditRecord:audit('coordinator','alarm','alarm','dispatch_error')}, {payload:state,kind:'state_snapshot'}];\n  }\n  const ds = nextDelay((state.ticket.attemptCount||0)+1);\n  state.phase = state.ticket.requestedBreakerState === 'open' ? 'retry_backoff_open' : 'retry_backoff_close';\n  state.ticket.status = 'backoff_wait'; updateStatus(); save();\n  return [null, {auditRecord:audit('coordinator','retry_after_error','delay_'+ds+'s','dispatch_error')}, {payload:state,kind:'retry_wait',delay:ds*1000}];\n}\n\n// ==================== VERIFY RESULT ====================\nif (msg.kind === 'verify_result') {\n  if (!state.ticket || msg.ticketId !== state.ticket.id) {\n    updateStatus(); save();\n    return [null, {auditRecord:audit('coordinator','verify_ignored','ignored','ticket_mismatch')}, {payload:state,kind:'state_snapshot'}];\n  }\n  state.actualBreakerState = msg.actualBreakerState || state.actualBreakerState;\n  state.lastObservedAt = Date.now();\n  if (msg.verifyStatus === 'confirmed') {\n    clearOK(); updateStatus(); save();\n    return [null, {auditRecord:audit('coordinator','verified_ok','ok','confirmed')}, {payload:state,kind:'state_snapshot'}];\n  }\n  if (msg.verifyStatus === 'uncertain') {\n    state.healthMode = 'comm_lost'; state.phase = 'comm_lost';\n    state.lastErrorClass = 'verify_uncertain'; state.recoveryMode = 'reconcile_pending';\n    updateStatus(); save();\n    return [null, {auditRecord:audit('coordinator','verify_uncertain','held','unknown')}, {payload:state,kind:'state_snapshot'}];\n  }\n  if (alarmReached() || !policy.keepRetrying) {\n    state.phase = 'alarm'; state.ticket.status = 'alarm'; state.lastErrorClass = 'verify_mismatch';\n    updateStatus(); save();\n    return [null, {auditRecord:audit('coordinator','alarm','alarm','verify_mismatch')}, {payload:state,kind:'state_snapshot'}];\n  }\n  const ds = nextDelay((state.ticket.attemptCount||0)+1);\n  state.phase = state.ticket.requestedBreakerState === 'open' ? 'retry_backoff_open' : 'retry_backoff_close';\n  state.ticket.status = 'backoff_wait'; state.lastErrorClass = 'verify_mismatch';\n  updateStatus(); save();\n  return [null, {auditRecord:audit('coordinator','retry_scheduled','delay_'+ds+'s','verify_failed')}, {payload:state,kind:'retry_wait',delay:ds*1000}];\n}\n\n// ==================== RETRY ELAPSED ====================\nif (msg.kind === 'retry_elapsed') {\n  if (!state.ticket) { updateStatus(); save(); return [null, {auditRecord:audit('coordinator','retry_no_ticket','noop','none')}, {payload:state,kind:'state_snapshot'}]; }\n  if (state.actualBreakerState === state.requiredBreakerState) { clearOK(); updateStatus(); save(); return [null, {auditRecord:audit('coordinator','retry_not_needed','ok','match')}, {payload:state,kind:'state_snapshot'}]; }\n  if (state.healthMode === 'comm_lost') { state.recoveryMode = 'reconcile_pending'; updateStatus(); save(); return [null, {auditRecord:audit('coordinator','retry_blocked','held','comm_lost')}, {payload:state,kind:'state_snapshot'}]; }\n  const d = makeDispatch('retry');\n  updateStatus();\n  return [d, {auditRecord:audit('coordinator','retry_dispatch','dispatch','elapsed')}, {payload:state,kind:'state_snapshot'}];\n}\n\n// ==================== MANUAL RECONCILE ====================\nif (msg.kind === 'manual_reconcile') {\n  state.phase = 'reconciling'; state.recoveryMode = 'manual';\n  if (state.actualBreakerState === state.requiredBreakerState && state.actualBreakerState !== 'unknown') {\n    clearOK(); updateStatus(); save();\n    return [null, {auditRecord:audit('coordinator','reconcile_ok','ok','compliant')}, {payload:state,kind:'state_snapshot'}];\n  }\n  if (state.healthMode !== 'comm_lost') {\n    const d = makeDispatch('reconcile');\n    updateStatus();\n    return [d, {auditRecord:audit('coordinator','reconcile_dispatch','dispatch','manual')}, {payload:state,kind:'state_snapshot'}];\n  }\n  updateStatus(); save();\n  return [null, {auditRecord:audit('coordinator','reconcile_held','held','comm_lost')}, {payload:state,kind:'state_snapshot'}];\n}\n\n// ==================== MANUAL RESET ====================\nif (msg.kind === 'manual_reset') {\n  const old = state.phase;\n  state.phase = 'boot'; state.ticket = null; state.healthMode = 'healthy';\n  state.recoveryMode = 'idle'; state.lastErrorClass = null;\n  state.mismatchSince = null; state.lastStallHandledAt = null;\n  state.lastDecisionReason = 'manual_reset from ' + old;\n  updateStatus(); save();\n  return [null, {auditRecord:audit('coordinator','manual_reset','reset','from_'+old)}, {payload:state,kind:'state_snapshot'}];\n}\n\n// ==================== HA READ ERROR ====================\nif (msg.kind === 'ha_read_error') {\n  state.lastErrorClass = 'ha_read_error';\n  node.warn('[DEVXX] HA read error — system continues healthy. Error: ' + ((msg.error||{}).message||'unknown'));\n  updateStatus(); save();\n  return [null, {auditRecord:audit('coordinator','ha_read_error','warn','read_failed')}, {payload:state,kind:'state_snapshot'}];\n}\n\n// ==================== PHASE TIMEOUT ====================\nif (msg.kind === 'phase_timeout') {\n  state.lastErrorClass = 'phase_timeout';\n  state.lastDecisionReason = 'timeout: ' + msg.stalePhase + ' ' + msg.elapsedMs + 'ms';\n  if (alarmReached()) {\n    state.phase = 'alarm'; if (state.ticket) state.ticket.status = 'alarm';\n    updateStatus(); save();\n    return [null, {auditRecord:audit('coordinator','alarm','alarm','phase_timeout')}, {payload:state,kind:'state_snapshot'}];\n  }\n  if (state.ticket && state.healthMode !== 'comm_lost') {\n    const ds = nextDelay((state.ticket.attemptCount||0)+1);\n    state.phase = state.ticket.requestedBreakerState === 'open' ? 'retry_backoff_open' : 'retry_backoff_close';\n    state.ticket.status = 'backoff_wait'; updateStatus(); save();\n    return [null, {auditRecord:audit('coordinator','retry_after_timeout','delay_'+ds+'s','timeout')}, {payload:state,kind:'retry_wait',delay:ds*1000}];\n  }\n  holdMM(); updateStatus(); save();\n  return [null, {auditRecord:audit('coordinator','timeout_held','held','no_ticket')}, {payload:state,kind:'state_snapshot'}];\n}\n\n// ==================== UNKNOWN ====================\nupdateStatus(); save();\nreturn [null, {auditRecord:audit('coordinator','ignored','ignored','unknown_kind')}, {payload:state,kind:'state_snapshot'}];",
+    "outputs": 3,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 980,
+    "y": 380,
+    "wires": [
+      [
+        "sw_dispatch"
+      ],
+      [
+        "fn_audit"
+      ],
+      [
+        "dbg_state_live",
+        "sw_retry_only"
+      ]
+    ]
+  },
+  {
+    "id": "sw_dispatch",
+    "type": "switch",
+    "z": "tab_devxx_control_v4",
+    "name": "Open / Close",
+    "property": "command",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "eq",
+        "v": "open",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "close",
+        "vt": "str"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 2,
+    "x": 1250,
+    "y": 310,
+    "wires": [
+      [
+        "svc_unlock_open"
+      ],
+      [
+        "svc_unlock_close"
+      ]
+    ]
+  },
+  {
+    "id": "svc_unlock_open",
+    "type": "api-call-service",
+    "z": "tab_devxx_control_v4",
+    "name": "Unlock for OPEN",
+    "server": "server_devxx_ha",
+    "version": 7,
+    "debugenabled": false,
+    "action": "button.press",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "button.esps3_devxx_unlock_button"
+    ],
+    "labelId": [],
+    "data": "{}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "last",
+    "blockInputOverrides": false,
+    "domain": "button",
+    "service": "press",
+    "x": 1440,
+    "y": 270,
+    "wires": [
+      [
+        "delay_unlock_open"
+      ]
+    ]
+  },
+  {
+    "id": "svc_unlock_close",
+    "type": "api-call-service",
+    "z": "tab_devxx_control_v4",
+    "name": "Unlock for CLOSE",
+    "server": "server_devxx_ha",
+    "version": 7,
+    "debugenabled": false,
+    "action": "button.press",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "button.esps3_devxx_unlock_button"
+    ],
+    "labelId": [],
+    "data": "{}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "last",
+    "blockInputOverrides": false,
+    "domain": "button",
+    "service": "press",
+    "x": 1440,
+    "y": 350,
+    "wires": [
+      [
+        "delay_unlock_close"
+      ]
+    ]
+  },
+  {
+    "id": "delay_unlock_open",
+    "type": "delay",
+    "z": "tab_devxx_control_v4",
+    "name": "Unlock 600ms",
+    "pauseType": "delay",
+    "timeout": "600",
+    "timeoutUnits": "milliseconds",
+    "rate": "1",
+    "nbRateUnits": "1",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": false,
+    "allowrate": false,
+    "outputs": 1,
+    "x": 1650,
+    "y": 270,
+    "wires": [
+      [
+        "svc_open"
+      ]
+    ]
+  },
+  {
+    "id": "delay_unlock_close",
+    "type": "delay",
+    "z": "tab_devxx_control_v4",
+    "name": "Unlock 600ms",
+    "pauseType": "delay",
+    "timeout": "600",
+    "timeoutUnits": "milliseconds",
+    "rate": "1",
+    "nbRateUnits": "1",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": false,
+    "allowrate": false,
+    "outputs": 1,
+    "x": 1650,
+    "y": 350,
+    "wires": [
+      [
+        "svc_close"
+      ]
+    ]
+  },
+  {
+    "id": "svc_open",
+    "type": "api-call-service",
+    "z": "tab_devxx_control_v4",
+    "name": "OPEN Breaker",
+    "server": "server_devxx_ha",
+    "version": 7,
+    "debugenabled": false,
+    "action": "button.press",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "button.esps3_devxx_open_button"
+    ],
+    "labelId": [],
+    "data": "{}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "last",
+    "blockInputOverrides": false,
+    "domain": "button",
+    "service": "press",
+    "x": 1850,
+    "y": 270,
+    "wires": [
+      [
+        "fn_dispatch_sent"
+      ]
+    ]
+  },
+  {
+    "id": "svc_close",
+    "type": "api-call-service",
+    "z": "tab_devxx_control_v4",
+    "name": "CLOSE Breaker",
+    "server": "server_devxx_ha",
+    "version": 7,
+    "debugenabled": false,
+    "action": "button.press",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "button.esps3_devxx_close_button"
+    ],
+    "labelId": [],
+    "data": "{}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "last",
+    "blockInputOverrides": false,
+    "domain": "button",
+    "service": "press",
+    "x": 1850,
+    "y": 350,
+    "wires": [
+      [
+        "fn_dispatch_sent"
+      ]
+    ]
+  },
+  {
+    "id": "fn_dispatch_sent",
+    "type": "function",
+    "z": "tab_devxx_control_v4",
+    "name": "Dispatcher: Sent",
+    "func": "const policy = flow.get('devxx_policy') || {};\nconst state = flow.get('devxx_state') || {};\nconst ackMsg = {\n  kind: 'dispatch_ack',\n  ticketId: msg.ticketId || ((state.ticket||{}).id||null),\n  attemptNo: msg.attemptNo || ((state.ticket||{}).attemptCount||0)\n};\nconst auditMsg = {\n  auditRecord: {\n    ts: Date.now(), deviceId: 'DEVXX', channel: 'actual',\n    sourceLayer: 'dispatcher', eventType: 'dispatch_sent',\n    phase: state.phase || 'dispatching',\n    desiredMode: state.desiredModeNow || null,\n    requiredBreakerState: state.requiredBreakerState || null,\n    actualBreakerState: state.actualBreakerState || null,\n    healthMode: state.healthMode || null,\n    ticketId: ackMsg.ticketId, attemptNo: ackMsg.attemptNo,\n    result: msg.command || 'sent', reasonCode: 'service_sent'\n  }\n};\nconst verifyMsg = {\n  ticketId: ackMsg.ticketId,\n  attemptNo: ackMsg.attemptNo,\n  delay: policy.verifyAfterMs || 8000\n};\nnode.status({fill:'yellow',shape:'dot',text:'Sent: ' + (msg.command||'?')});\nreturn [ackMsg, auditMsg, verifyMsg];",
+    "outputs": 3,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 2070,
+    "y": 310,
+    "wires": [
+      [
+        "fn_coordinator"
+      ],
+      [
+        "fn_audit"
+      ],
+      [
+        "delay_verify"
+      ]
+    ]
+  },
+  {
+    "id": "delay_verify",
+    "type": "delay",
+    "z": "tab_devxx_control_v4",
+    "name": "Verify Delay (policy)",
+    "pauseType": "delayv",
+    "timeout": "8",
+    "timeoutUnits": "seconds",
+    "rate": "1",
+    "nbRateUnits": "1",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": false,
+    "allowrate": false,
+    "outputs": 1,
+    "x": 2310,
+    "y": 310,
+    "wires": [
+      [
+        "cur_breaker"
+      ]
+    ]
+  },
+  {
+    "id": "cur_breaker",
+    "type": "api-current-state",
+    "z": "tab_devxx_control_v4",
+    "name": "Read Breaker for Verify",
+    "server": "server_devxx_ha",
+    "version": 3,
+    "outputs": 1,
+    "halt_if": "",
+    "halt_if_type": "str",
+    "halt_if_compare": "is",
+    "entity_id": "binary_sensor.esps3_devxx_nb2_status",
+    "state_type": "str",
+    "blockInputOverrides": false,
+    "outputProperties": [
+      {
+        "property": "payload",
+        "propertyType": "msg",
+        "value": "string",
+        "valueType": "entityState"
+      },
+      {
+        "property": "data",
+        "propertyType": "msg",
+        "value": "",
+        "valueType": "entity"
+      }
+    ],
+    "for": "0",
+    "forType": "num",
+    "forUnits": "minutes",
+    "override_topic": false,
+    "state_location": "payload",
+    "override_payload": "merge",
+    "entity_location": "data",
+    "override_data": "merge",
+    "x": 2540,
+    "y": 310,
+    "wires": [
+      [
+        "fn_verify"
+      ]
+    ]
+  },
+  {
+    "id": "fn_verify",
+    "type": "function",
+    "z": "tab_devxx_control_v4",
+    "name": "Verifier: Confirm Physical State",
+    "func": "// Normalize HA state to open/closed/unknown\n// ⚠ DUPLICATED: also in fn_breaker_classify. Keep in sync.\nfunction normalize(raw) {\n  const s = String(raw).toLowerCase().trim();\n  if (s === 'unavailable' || s === 'unknown' || s === 'null' || s === '') return 'unknown';\n  if (s === 'on' || s === 'true' || s === 'open') return 'open';\n  if (s === 'off' || s === 'false' || s === 'closed') return 'closed';\n  return 'unknown';\n}\nconst state = flow.get('devxx_state') || {};\nconst actual = normalize(msg.payload);\nconst ticket = state.ticket || {};\nmsg.kind = 'verify_result';\nmsg.ticketId = ticket.id || msg.ticketId || null;\nmsg.actualBreakerState = actual;\nmsg.verifyStatus = actual === 'unknown' ? 'uncertain' : (actual === state.requiredBreakerState ? 'confirmed' : 'mismatch');\n\nnode.status({fill: msg.verifyStatus === 'confirmed' ? 'green' : 'red', shape:'dot', text: msg.verifyStatus + ': ' + actual});\n\nconst audit = {\n  ts: Date.now(), deviceId: 'DEVXX', channel: 'actual',\n  sourceLayer: 'verifier', eventType: 'verify_result',\n  phase: state.phase || 'verifying',\n  desiredMode: state.desiredModeNow || null,\n  requiredBreakerState: state.requiredBreakerState || null,\n  actualBreakerState: actual, healthMode: state.healthMode || null,\n  ticketId: msg.ticketId, attemptNo: ticket.attemptCount || 0,\n  result: msg.verifyStatus, reasonCode: 'post_dispatch_check'\n};\nreturn [msg, {auditRecord: audit}];",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 2790,
+    "y": 310,
+    "wires": [
+      [
+        "fn_coordinator"
+      ],
+      [
+        "fn_audit"
+      ]
+    ]
+  },
+  {
+    "id": "sw_retry_only",
+    "type": "switch",
+    "z": "tab_devxx_control_v4",
+    "name": "Only retry_wait",
+    "property": "kind",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "eq",
+        "v": "retry_wait",
+        "vt": "str"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 1,
+    "x": 1250,
+    "y": 450,
+    "wires": [
+      [
+        "delay_retry"
+      ]
+    ]
+  },
+  {
+    "id": "delay_retry",
+    "type": "delay",
+    "z": "tab_devxx_control_v4",
+    "name": "Retry Backoff (msg.delay)",
+    "pauseType": "delayv",
+    "timeout": "5",
+    "timeoutUnits": "seconds",
+    "rate": "1",
+    "nbRateUnits": "1",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": false,
+    "allowrate": false,
+    "outputs": 1,
+    "x": 1460,
+    "y": 450,
+    "wires": [
+      [
+        "chg_retry_elapsed"
+      ]
+    ]
+  },
+  {
+    "id": "chg_retry_elapsed",
+    "type": "change",
+    "z": "tab_devxx_control_v4",
+    "name": "Set: retry_elapsed",
+    "rules": [
+      {
+        "t": "set",
+        "p": "kind",
+        "pt": "msg",
+        "to": "retry_elapsed",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 1690,
+    "y": 450,
+    "wires": [
+      [
+        "fn_coordinator"
+      ]
+    ]
+  },
+  {
+    "id": "inj_watchdog",
+    "type": "inject",
+    "z": "tab_devxx_control_v4",
+    "name": "Phase Watchdog (60s)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "60",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "10",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 160,
+    "y": 670,
+    "wires": [
+      [
+        "fn_watchdog"
+      ]
+    ]
+  },
+  {
+    "id": "fn_watchdog",
+    "type": "function",
+    "z": "tab_devxx_control_v4",
+    "name": "Phase Timeout Check",
+    "func": "const state = flow.get('devxx_state') || {};\nconst TIMEOUTS = {\n  'dispatching_open': 30000, 'dispatching_close': 30000,\n  'verifying_open': 20000, 'verifying_close': 20000,\n  'retry_backoff_open': 330000, 'retry_backoff_close': 330000,\n  'reconciling': 60000\n};\nconst maxMs = TIMEOUTS[state.phase];\nif (!maxMs) return null;\nconst ref = (state.ticket && state.ticket.lastAttemptAt) ? state.ticket.lastAttemptAt\n  : (state.ticket && state.ticket.createdAt) ? state.ticket.createdAt : Date.now();\nconst elapsed = Date.now() - ref;\nif (elapsed > maxMs) {\n  msg.kind = 'phase_timeout';\n  msg.stalePhase = state.phase;\n  msg.elapsedMs = elapsed;\n  node.status({fill:'red',shape:'ring',text:'TIMEOUT: ' + state.phase});\n  msg.auditRecord = {\n    ts: Date.now(), deviceId: 'DEVXX', channel: 'actual',\n    sourceLayer: 'watchdog', eventType: 'phase_timeout',\n    phase: state.phase, desiredMode: state.desiredModeNow || null,\n    requiredBreakerState: state.requiredBreakerState || null,\n    actualBreakerState: state.actualBreakerState || null,\n    healthMode: state.healthMode || null,\n    ticketId: (state.ticket||{}).id || null,\n    attemptNo: (state.ticket||{}).attemptCount || 0,\n    result: 'timeout_' + elapsed + 'ms',\n    reasonCode: 'phase_exceeded_' + maxMs + 'ms'\n  };\n  return [msg, {auditRecord: msg.auditRecord}];\n}\nnode.status({fill:'green',shape:'dot',text:'OK: ' + state.phase});\nreturn null;",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 670,
+    "wires": [
+      [
+        "fn_coordinator"
+      ],
+      [
+        "fn_audit"
+      ]
+    ]
+  },
+  {
+    "id": "catch_ha",
+    "type": "catch",
+    "z": "tab_devxx_control_v4",
+    "name": "Catch HA Errors",
+    "scope": [
+      "svc_unlock_open",
+      "svc_unlock_close",
+      "svc_open",
+      "svc_close",
+      "cur_boot_breaker",
+      "cur_breaker"
+    ],
+    "uncaught": false,
+    "x": 150,
+    "y": 740,
+    "wires": [
+      [
+        "fn_ha_error_router"
+      ]
+    ]
+  },
+  {
+    "id": "fn_ha_error_router",
+    "type": "function",
+    "z": "tab_devxx_control_v4",
+    "name": "Route HA Errors (by node ID)",
+    "func": "const state = flow.get('devxx_state') || {};\nconst READ_NODE_IDS = ['cur_boot_breaker', 'cur_breaker'];\nconst sourceId = ((msg.error||{}).source||{}).id || '';\nconst sourceName = ((msg.error||{}).source||{}).name || sourceId;\nconst isRead = READ_NODE_IDS.includes(sourceId);\nmsg.kind = isRead ? 'ha_read_error' : 'dispatch_error';\nmsg.ticketId = ((state.ticket||{}).id) || null;\nmsg.errorSource = sourceName;\n\nnode.status({fill:'red',shape:'ring',text: msg.kind + ': ' + sourceName});\n\nmsg.auditRecord = {\n  ts: Date.now(), deviceId: 'DEVXX', channel: 'actual',\n  sourceLayer: 'catch', eventType: msg.kind,\n  phase: state.phase || 'boot',\n  desiredMode: state.desiredModeNow || null,\n  requiredBreakerState: state.requiredBreakerState || null,\n  actualBreakerState: state.actualBreakerState || null,\n  healthMode: state.healthMode || null,\n  ticketId: msg.ticketId,\n  attemptNo: ((state.ticket||{}).attemptCount) || 0,\n  result: sourceName,\n  reasonCode: ((msg.error||{}).message) || 'ha_error'\n};\nreturn [msg, {auditRecord: msg.auditRecord}];",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 740,
+    "wires": [
+      [
+        "fn_coordinator"
+      ],
+      [
+        "fn_audit"
+      ]
+    ]
+  },
+  {
+    "id": "fn_audit",
+    "type": "function",
+    "z": "tab_devxx_control_v4",
+    "name": "Audit Writer",
+    "func": "const policy = flow.get('devxx_policy') || { journalLimit: 500 };\nconst rec = msg.auditRecord;\nif (!rec) return null;\nconst expected = flow.get('devxx_expected_journal') || [];\nconst actual = flow.get('devxx_actual_journal') || [];\nconst line = { ...rec, iso: new Date(rec.ts).toISOString() };\nif (rec.channel === 'expected') expected.push(line); else actual.push(line);\n// Efficient trim with splice instead of while/shift\nif (expected.length > policy.journalLimit) expected.splice(0, expected.length - policy.journalLimit);\nif (actual.length > policy.journalLimit) actual.splice(0, actual.length - policy.journalLimit);\nflow.set('devxx_expected_journal', expected);\nflow.set('devxx_actual_journal', actual);\n\nnode.status({fill:'grey',shape:'dot',text: rec.eventType + ' [' + rec.channel + ']'});\n\nmsg.payload = line;\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1200,
+    "y": 570,
+    "wires": [
+      [
+        "dbg_audit"
+      ]
+    ]
+  },
+  {
+    "id": "dbg_audit",
+    "type": "debug",
+    "z": "tab_devxx_control_v4",
+    "name": "AUDIT EVENT",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1410,
+    "y": 570,
+    "wires": []
+  },
+  {
+    "id": "dbg_state_live",
+    "type": "debug",
+    "z": "tab_devxx_control_v4",
+    "name": "LIVE STATE",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1200,
+    "y": 680,
+    "wires": []
+  },
+  {
+    "id": "inj_report",
+    "type": "inject",
+    "z": "tab_devxx_control_v4",
+    "name": "Build Report",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "0.1",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 150,
+    "y": 810,
+    "wires": [
+      [
+        "fn_report"
+      ]
+    ]
+  },
+  {
+    "id": "fn_report",
+    "type": "function",
+    "z": "tab_devxx_control_v4",
+    "name": "Build Audit Report",
+    "func": "const state = flow.get('devxx_state') || {};\nconst expected = flow.get('devxx_expected_journal') || [];\nconst actual = flow.get('devxx_actual_journal') || [];\nconst out = [];\nout.push('=== DEVXX CONTROL REPORT v4 ===');\nout.push('Generated: ' + new Date().toISOString());\nout.push('');\nout.push('Current State:');\nout.push(JSON.stringify(state, null, 2));\nout.push('');\nout.push('Last 10 Expected Journal:');\nout.push(JSON.stringify(expected.slice(-10).reverse(), null, 2));\nout.push('');\nout.push('Last 20 Actual Journal:');\nout.push(JSON.stringify(actual.slice(-20).reverse(), null, 2));\nmsg.payload = out.join('\\n');\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 810,
+    "wires": [
+      [
+        "dbg_report"
+      ]
+    ]
+  },
+  {
+    "id": "dbg_report",
+    "type": "debug",
+    "z": "tab_devxx_control_v4",
+    "name": "AUDIT REPORT",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 600,
+    "y": 810,
+    "wires": []
+  }
+]

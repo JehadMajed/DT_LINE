@@ -1,0 +1,15 @@
+1.mqtt run 
+
+
+cd "C:\Program Files\Mosquitto"
+
+mosquitto -c mosquitto.conf -v
+
+
+
+
+
+______
+2.Node-Red 
+
+Run nodered by {node-red}
