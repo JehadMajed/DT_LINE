@@ -211,7 +211,7 @@ const optState = {
 // ── MQTT Configuration ─────────────────────────────────────────────────────
 // Adjust brokerUrl if your Mosquitto WebSocket port differs from 9001.
 const MQTT_CFG = {
-    brokerUrl: 'ws://192.168.1.27:9001',        // Changed from localhost to local network IP
+    brokerUrl: 'ws://192.168.1.32:9001',        // Changed from localhost to local network IP
     topicSub: 'digital_twin/motor/telemetry', // ESP32 -> app
     topicCmd: 'digital_twin/motor/command',   // app -> ESP32
     clientId: 'dt_twin_' + Math.random().toString(16).slice(2, 8),
