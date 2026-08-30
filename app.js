@@ -1219,39 +1219,6 @@ const createScene = async function () {
 
     let kinematics = { pulleys: [], belts: [], boxes: [], shadowGenerator: shadowGenerator };
 
-    // [TAB2-SPARKLINE] Voltage sparkline history — stores last 10 voltage samples.
-    // Used by drawPowerSparkline() to render a mini line chart on Tab 2.
-    // To remove: delete this declaration, drawPowerSparkline(), and the canvas in index.html.
-    const powerSparklineHistory = [];
-
-    function drawPowerSparkline(data) {
-        const canvas = document.getElementById('model-sparkline-volt');
-        if (!canvas || data.length < 2) return;
-        const ctx = canvas.getContext('2d');
-        const W = canvas.width;
-        const H = canvas.height;
-        ctx.clearRect(0, 0, W, H);
-        const minV = Math.min(...data) - 0.5;
-        const maxV = Math.max(...data) + 0.5;
-        const range = maxV - minV || 1;
-        ctx.beginPath();
-        data.forEach((v, i) => {
-            const x = (i / (data.length - 1)) * W;
-            const y = H - ((v - minV) / range) * H;
-            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-        });
-        ctx.strokeStyle = '#0284C7';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        // Fill gradient
-        ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
-        const grad = ctx.createLinearGradient(0, 0, 0, H);
-        grad.addColorStop(0, 'rgba(2,132,199,0.25)');
-        grad.addColorStop(1, 'rgba(2,132,199,0)');
-        ctx.fillStyle = grad;
-        ctx.fill();
-    }
-
     addLog('Loading GLB Asset via Babylon.js...');
     const result = await BABYLON.SceneLoader.ImportMeshAsync('', 'assets/', 'Conveyor_Twin_v1.glb', scene);
 
@@ -1593,6 +1560,37 @@ function animateCameraTarget(camera, newTarget, scene) {
         camera.target.clone(), newTarget,
         BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT
     );
+}
+
+// [TAB2-SPARKLINE] Voltage sparkline history — stores last 10 voltage samples.
+const powerSparklineHistory = [];
+
+function drawPowerSparkline(data) {
+    const canvas = document.getElementById('model-sparkline-volt');
+    if (!canvas || data.length < 2) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    const minV = Math.min(...data) - 0.5;
+    const maxV = Math.max(...data) + 0.5;
+    const range = maxV - minV || 1;
+    ctx.beginPath();
+    data.forEach((v, i) => {
+        const x = (i / (data.length - 1)) * W;
+        const y = H - ((v - minV) / range) * H;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = '#0284C7';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // Fill gradient
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, 'rgba(2,132,199,0.25)');
+    grad.addColorStop(1, 'rgba(2,132,199,0)');
+    ctx.fillStyle = grad;
+    ctx.fill();
 }
 
 // ============================================================================
