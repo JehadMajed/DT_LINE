@@ -27,9 +27,9 @@ const UI = {
     teleProximity: document.getElementById('tele-proximity'),
     teleTempVal: document.getElementById('tele-temp-val'),
     btnSetRpm: document.getElementById('btn-set-rpm'),
-    btnWalkSlow:   document.getElementById('btn-walk-slow'),
+    btnWalkSlow: document.getElementById('btn-walk-slow'),
     btnWalkMedium: document.getElementById('btn-walk-medium'),
-    btnWalkFast:   document.getElementById('btn-walk-fast'),
+    btnWalkFast: document.getElementById('btn-walk-fast'),
     walkSettleBanner: document.getElementById('walk-settle-banner'),
 
     // Executive Overview (Business KPIs)
@@ -128,19 +128,19 @@ function updateNb2Buttons() {
     const rs485Ok = TEL.nb2Rs485Ok;
 
     // Overview tab buttons — still gated by HW + RS485
-    if (UI.btnNb2On)  UI.btnNb2On.disabled  = !HW.connected || !rs485Ok;
+    if (UI.btnNb2On) UI.btnNb2On.disabled = !HW.connected || !rs485Ok;
     if (UI.btnNb2Off) UI.btnNb2Off.disabled = !HW.connected || !rs485Ok;
 
     // 3D Model tab buttons — ALWAYS enabled so operator can interact.
     // A confirm() dialog on the OFF button prevents accidental trips.
     // Visual opacity reflects connectivity state without blocking access.
-    const btnOnModel     = document.getElementById('btn-nb2-on-model');
-    const btnOffModel    = document.getElementById('btn-nb2-off-model');
+    const btnOnModel = document.getElementById('btn-nb2-on-model');
+    const btnOffModel = document.getElementById('btn-nb2-off-model');
     const btnUnlockModel = document.getElementById('btn-nb2-unlock-model');
     const dimVal = HW.connected ? '1' : '0.55';
-    if (btnOnModel)     { btnOnModel.disabled     = false; btnOnModel.style.opacity     = dimVal; }
-    if (btnOffModel)    { btnOffModel.disabled     = false; btnOffModel.style.opacity    = dimVal; }
-    if (btnUnlockModel) { btnUnlockModel.disabled  = false; btnUnlockModel.style.opacity = dimVal; }
+    if (btnOnModel) { btnOnModel.disabled = false; btnOnModel.style.opacity = dimVal; }
+    if (btnOffModel) { btnOffModel.disabled = false; btnOffModel.style.opacity = dimVal; }
+    if (btnUnlockModel) { btnUnlockModel.disabled = false; btnUnlockModel.style.opacity = dimVal; }
 }
 
 // ── MQTT Replica State ─────────────────────────────────────────────────────
@@ -180,7 +180,7 @@ const optState = {
 // ── MQTT Configuration ─────────────────────────────────────────────────────
 // Adjust brokerUrl if your Mosquitto WebSocket port differs from 9001.
 const MQTT_CFG = {
-    brokerUrl: 'ws://192.168.1.32:9001',        // Changed from localhost to local network IP
+    brokerUrl: 'ws://192.168.1.102:9001',        // Changed from localhost to local network IP
     topicSub: 'digital_twin/motor/telemetry', // ESP32 -> app
     topicCmd: 'digital_twin/motor/command',   // app -> ESP32
     clientId: 'dt_twin_' + Math.random().toString(16).slice(2, 8),
@@ -402,7 +402,7 @@ function flushTelemetryToDOM() {
             if (faults > 0 || alarms > 0) {
                 UI.nb2FaultBar.classList.remove('hidden');
                 const faultNames = [];
-                
+
                 // Process Fault Flags (Critical Tripping)
                 if (faults & 0x0001) faultNames.push('Short Circuit Fault');
                 if (faults & 0x0002) faultNames.push('Overload Fault');
@@ -419,7 +419,7 @@ function flushTelemetryToDOM() {
                 if (faults & 0xF000) {
                     faultNames.push('System Fault (0x' + (faults & 0xF000).toString(16) + ')');
                 }
-                
+
                 // Process Alarm Flags (Warnings)
                 if (alarms & 0x0001) faultNames.push('Leakage Alarm');
                 if (alarms & 0x0002) faultNames.push('Over-temp Alarm');
@@ -518,8 +518,8 @@ function updateHwBadge(connected) {
 function updateSimControlsState() {
     // Simulation controls: disabled when real hardware is active
     const simControls = [UI.simRpm, UI.simVolt, UI.simLoad,
-        UI.btnSimRun, UI.btnSimStop, UI.btnSimSetRpm,
-        UI.btnSimSetVolt, UI.btnSimSetLoad];
+    UI.btnSimRun, UI.btnSimStop, UI.btnSimSetRpm,
+    UI.btnSimSetVolt, UI.btnSimSetLoad];
     simControls.forEach(el => { if (el) el.disabled = HW.connected; });
 
     // Hardware controls in 3D Model tab: only meaningful when MQTT connected
@@ -551,9 +551,9 @@ function updateSimControlsState() {
     if (!HW.connected) {
         ['model-replica-rpm', 'model-replica-speed',
             'model-replica-prox', 'model-replica-latency'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) { el.textContent = '—'; el.style.color = ''; }
-        });
+                const el = document.getElementById(id);
+                if (el) { el.textContent = '—'; el.style.color = ''; }
+            });
         const freshnessEl = document.getElementById('mqtt-freshness-fill');
         if (freshnessEl) { freshnessEl.style.width = '0%'; freshnessEl.style.background = 'var(--border-subtle)'; }
     }
@@ -609,14 +609,14 @@ function parseTelemetry(rawString) {
         const data = JSON.parse(rawString);
 
         let baseRpm = parseFloat(data.estimated_rpm ?? data.rpm) || 0;
-        
+
         // Add artificial +/- 7% tolerance (jitter) to make it look like a real physical sensor
         if (baseRpm > 0) {
             const jitter = 1.0 + (Math.random() * 0.14 - 0.07); // 0.93 to 1.07
             baseRpm *= jitter;
         }
         const rpm = baseRpm;
-        
+
         const pwm = parseInt(data.speed_percent) || 0;
         const prox = data.e18_active !== undefined ? !!data.e18_active : !!data.sensor_active;
         const temp = data.temp_c !== undefined && data.temp_c !== null ? parseFloat(data.temp_c) : null;
@@ -719,7 +719,7 @@ function parseTelemetry(rawString) {
                 if (nb2FaultFlags & 0x0400) faultMsgs.push("Phase Sequence");
                 if (nb2FaultFlags & 0x0800) faultMsgs.push("Arc Fault");
                 if (nb2FaultFlags & 0xF000) faultMsgs.push("Other Fault (0x" + (nb2FaultFlags & 0xF000).toString(16) + ")");
-                
+
                 if (nb2AlarmFlags & 0x0001) faultMsgs.push("Leakage ALARM");
                 if (nb2AlarmFlags & 0x0002) faultMsgs.push("OverTemp ALARM");
                 if (nb2AlarmFlags & 0x0004) faultMsgs.push("Unbalance ALARM");
@@ -729,7 +729,7 @@ function parseTelemetry(rawString) {
                 if (nb2AlarmFlags & 0xFFC0) faultMsgs.push("Other Alarm (0x" + (nb2AlarmFlags & 0xFFC0).toString(16) + ")");
 
                 let fullText = faultMsgs.join(" | ");
-                
+
                 const faultBar = document.getElementById('nb2-fault-bar');
                 const faultText = document.getElementById('nb2-fault-text');
                 if (faultBar && faultText) {
@@ -1448,18 +1448,18 @@ function getComponentMetadata(meshName) {
 function updateInspector(mesh) {
     // ── Tab 2 inspector panel ──
     if (!mesh) {
-        if (UI.inspectorIdle)    UI.inspectorIdle.classList.remove('hidden');
+        if (UI.inspectorIdle) UI.inspectorIdle.classList.remove('hidden');
         if (UI.inspectorDetails) UI.inspectorDetails.classList.add('hidden');
     } else {
         const meta = getComponentMetadata(mesh.name);
-        if (UI.inspectName)     UI.inspectName.textContent     = meta.name;
+        if (UI.inspectName) UI.inspectName.textContent = meta.name;
         if (UI.inspectCategory) UI.inspectCategory.textContent = meta.category;
-        if (UI.inspectSpecs)    UI.inspectSpecs.textContent    = meta.specs;
+        if (UI.inspectSpecs) UI.inspectSpecs.textContent = meta.specs;
         if (UI.inspectStatus) {
             UI.inspectStatus.textContent = meta.status;
-            UI.inspectStatus.className   = `inspect-status-pill ${meta.healthClass}`;
+            UI.inspectStatus.className = `inspect-status-pill ${meta.healthClass}`;
         }
-        if (UI.inspectorIdle)    UI.inspectorIdle.classList.add('hidden');
+        if (UI.inspectorIdle) UI.inspectorIdle.classList.add('hidden');
         if (UI.inspectorDetails) UI.inspectorDetails.classList.remove('hidden');
     }
 
@@ -1467,22 +1467,22 @@ function updateInspector(mesh) {
     // The 3D canvas is shared, so pointer clicks fire for both tabs; we show the
     // correct panel based on which tab is currently active.
     // To remove: delete this block and the inspector HTML in Tab 3 (index.html).
-    const simDetails  = document.getElementById('inspector-details-sim');
-    const simName     = document.getElementById('inspect-name-sim');
+    const simDetails = document.getElementById('inspector-details-sim');
+    const simName = document.getElementById('inspect-name-sim');
     const simCategory = document.getElementById('inspect-category-sim');
-    const simSpecs    = document.getElementById('inspect-specs-sim');
-    const simStatus   = document.getElementById('inspect-status-sim');
+    const simSpecs = document.getElementById('inspect-specs-sim');
+    const simStatus = document.getElementById('inspect-status-sim');
 
     if (!mesh) {
         if (simDetails) simDetails.classList.add('hidden');
     } else {
         const meta = getComponentMetadata(mesh.name);
-        if (simName)     simName.textContent     = meta.name;
+        if (simName) simName.textContent = meta.name;
         if (simCategory) simCategory.textContent = meta.category;
-        if (simSpecs)    simSpecs.textContent    = meta.specs;
+        if (simSpecs) simSpecs.textContent = meta.specs;
         if (simStatus) {
             simStatus.textContent = meta.status;
-            simStatus.className   = `inspect-status-pill ${meta.healthClass}`;
+            simStatus.className = `inspect-status-pill ${meta.healthClass}`;
         }
         if (simDetails) simDetails.classList.remove('hidden');
     }
@@ -1622,7 +1622,7 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                     freshnessEl.style.width = freshPct + '%';
                     freshnessEl.style.background =
                         freshPct > 50 ? 'var(--status-ok)' :
-                        freshPct > 20 ? 'var(--status-warn)' : 'var(--status-crit)';
+                            freshPct > 20 ? 'var(--status-warn)' : 'var(--status-crit)';
                 }
             }
             const latEl = document.getElementById('model-replica-latency');
@@ -1656,9 +1656,9 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
             // To remove this feature: delete this block AND the four tele-items in index.html.
             const nb2Ok = HW.connected && MQTT_STATE.nb2.rs485Ok;
             const replicaVolt = document.getElementById('model-replica-volt');
-            const replicaAmp  = document.getElementById('model-replica-amp');
-            const replicaPwr  = document.getElementById('model-replica-pwr');
-            const replicaPF   = document.getElementById('model-replica-pf');
+            const replicaAmp = document.getElementById('model-replica-amp');
+            const replicaPwr = document.getElementById('model-replica-pwr');
+            const replicaPF = document.getElementById('model-replica-pf');
 
             if (replicaVolt) {
                 const v = nb2Ok ? MQTT_STATE.nb2.voltage : (HW.connected ? parseFloat(TEL.volt) || 0 : '--');
@@ -2204,9 +2204,9 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
         }, 4000);
     }
 
-    if (UI.btnWalkSlow)   UI.btnWalkSlow.addEventListener('click',   () => activateWalkPreset('slow'));
+    if (UI.btnWalkSlow) UI.btnWalkSlow.addEventListener('click', () => activateWalkPreset('slow'));
     if (UI.btnWalkMedium) UI.btnWalkMedium.addEventListener('click', () => activateWalkPreset('medium'));
-    if (UI.btnWalkFast)   UI.btnWalkFast.addEventListener('click',   () => activateWalkPreset('fast'));
+    if (UI.btnWalkFast) UI.btnWalkFast.addEventListener('click', () => activateWalkPreset('fast'));
 
     // ============================================================================
     // E-STOP — Hold-to-Activate (1 second hold required)
@@ -2311,7 +2311,7 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                 if (targetTab === 'model' || targetTab === 'simulation') {
                     if (canvasElement) {
                         canvasElement.classList.remove('hidden');
-                        
+
                         // Move the canvas to the correct placeholder
                         const modelPlaceholder = document.getElementById('model-viewport-placeholder');
                         const simPlaceholder = document.getElementById('sim-viewport-placeholder');
@@ -2326,7 +2326,7 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                         } else {
                             document.body.appendChild(canvasElement);
                         }
-                        
+
                         // Force Babylon.js engine resize to fit viewport
                         if (engine) {
                             engine.resize();
@@ -2460,21 +2460,21 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
 (function initCameraFeedController() {
 
     // #ADD CAMERA EXT — DOM refs (new panel-section structure)
-    const feedBody    = document.getElementById('camfeed-body');       // collapsible content
-    const btnToggle   = document.getElementById('btn-camfeed-toggle'); // chevron in section header
-    const chevron     = document.getElementById('camfeed-chevron');    // SVG chevron icon
-    const recDot      = document.getElementById('camfeed-rec-dot');    // pulsing status dot
-    const feedImg     = document.getElementById('camfeed-img');
-    const errOverlay  = document.getElementById('camfeed-error');
+    const feedBody = document.getElementById('camfeed-body');       // collapsible content
+    const btnToggle = document.getElementById('btn-camfeed-toggle'); // chevron in section header
+    const chevron = document.getElementById('camfeed-chevron');    // SVG chevron icon
+    const recDot = document.getElementById('camfeed-rec-dot');    // pulsing status dot
+    const feedImg = document.getElementById('camfeed-img');
+    const errOverlay = document.getElementById('camfeed-error');
     const loadOverlay = document.getElementById('camfeed-loading');
-    const zoomFill    = document.getElementById('camfeed-zoom-fill');
-    const btnZoomIn   = document.getElementById('btn-cam-zoom-in');
-    const btnZoomOut  = document.getElementById('btn-cam-zoom-out');
-    const btnZoomRst  = document.getElementById('btn-cam-zoom-reset');
-    const btnUp       = document.getElementById('btn-cam-up');
-    const btnDown     = document.getElementById('btn-cam-down');
-    const btnLeft     = document.getElementById('btn-cam-left');
-    const btnRight    = document.getElementById('btn-cam-right');
+    const zoomFill = document.getElementById('camfeed-zoom-fill');
+    const btnZoomIn = document.getElementById('btn-cam-zoom-in');
+    const btnZoomOut = document.getElementById('btn-cam-zoom-out');
+    const btnZoomRst = document.getElementById('btn-cam-zoom-reset');
+    const btnUp = document.getElementById('btn-cam-up');
+    const btnDown = document.getElementById('btn-cam-down');
+    const btnLeft = document.getElementById('btn-cam-left');
+    const btnRight = document.getElementById('btn-cam-right');
 
     if (!feedBody || !btnToggle) return; // guard if DOM not ready
 
@@ -2482,13 +2482,13 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
     let isOpen = false;
 
     // #ADD CAMERA EXT — zoom / pan state
-    const ZOOM_MIN  = 1.0;
-    const ZOOM_MAX  = 4.0;
+    const ZOOM_MIN = 1.0;
+    const ZOOM_MAX = 4.0;
     const ZOOM_STEP = 0.5;
-    const PAN_STEP  = 8;   // percent of viewport per D-pad press
-    let   camZoom   = 1.35; // Default zoom to cut black bars slightly
-    let   panX      = 0;
-    let   panY      = -15;  // Default pan UP (negative) to hide the top sofa area
+    const PAN_STEP = 8;   // percent of viewport per D-pad press
+    let camZoom = 1.35; // Default zoom to cut black bars slightly
+    let panX = 0;
+    let panY = -15;  // Default pan UP (negative) to hide the top sofa area
 
     // #ADD CAMERA EXT — apply transform to img element
     function applyTransform() {
@@ -2532,12 +2532,12 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
         if (!feedImg) return;
 
         // Reset to loading state — use style.display, never .hidden class
-        errOverlay.style.display   = 'none';
-        feedImg.style.display      = 'none';
-        loadOverlay.style.display  = 'flex';
+        errOverlay.style.display = 'none';
+        feedImg.style.display = 'none';
+        loadOverlay.style.display = 'flex';
         if (recDot) {
             recDot.style.background = '';   // back to CSS var (green pulse)
-            recDot.style.animation  = '';
+            recDot.style.animation = '';
         }
 
         // #CAM FEED URL — set the camera stream URL here before testing
@@ -2555,30 +2555,30 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
 
     // #ADD CAMERA EXT — called when feed image loads successfully
     function showFeedLive() {
-        loadOverlay.style.display  = 'none';
-        errOverlay.style.display   = 'none';
-        feedImg.style.display      = 'block';
+        loadOverlay.style.display = 'none';
+        errOverlay.style.display = 'none';
+        feedImg.style.display = 'block';
         if (recDot) {
             recDot.style.background = '';
-            recDot.style.animation  = '';
+            recDot.style.animation = '';
         }
     }
 
     // #ADD CAMERA EXT — called when feed fails to load or URL is empty
     function showFeedError() {
-        loadOverlay.style.display  = 'none';
-        feedImg.style.display      = 'none';
-        errOverlay.style.display   = 'flex';
+        loadOverlay.style.display = 'none';
+        feedImg.style.display = 'none';
+        errOverlay.style.display = 'flex';
         // Switch REC dot to amber — stream not active
         if (recDot) {
             recDot.style.background = '#F59E0B';
-            recDot.style.animation  = 'none';
+            recDot.style.animation = 'none';
         }
     }
 
     // #ADD CAMERA EXT — img element event handlers
     if (feedImg) {
-        feedImg.addEventListener('load',  showFeedLive);
+        feedImg.addEventListener('load', showFeedLive);
         feedImg.addEventListener('error', showFeedError);
     }
 
@@ -2606,8 +2606,8 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
     // #ADD CAMERA EXT — zoom reset (1:1) + re-center pan
     btnZoomRst.addEventListener('click', () => {
         camZoom = 1.0;
-        panX    = 0;
-        panY    = 0;
+        panX = 0;
+        panY = 0;
         applyTransform();
         syncZoomBar();
     });
