@@ -62,7 +62,19 @@ try:
                     
                     # Publish to MQTT
                     mqtt_client.publish(TOPIC_TELEMETRY, json_str)
-                    print(f"[ESP32 -> MQTT] Telemetry: {json_str[:50]}...")
+                    
+                    # Parse and print full formatted readings
+                    try:
+                        t_data = json.loads(json_str)
+                        nb2 = t_data.get('nb2', {})
+                        v = nb2.get('voltage', '--')
+                        c = nb2.get('current', '--')
+                        p = nb2.get('active_power', '--')
+                        pf = nb2.get('power_factor', '--')
+                        rs = "OK" if nb2.get('rs485_ok') else "FAIL"
+                        print(f"[ESP32 -> MQTT] RPM: {t_data.get('rpm', 0):.1f} | AC: {v}V, {c}A, {p}W (PF: {pf}) | RS485: {rs}")
+                    except Exception:
+                        print(f"[ESP32 -> MQTT] Telemetry: {json_str}")
                 except json.JSONDecodeError:
                     print(f"Invalid JSON from Serial: {line}")
             

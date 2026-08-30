@@ -11,7 +11,7 @@ const UI = {
     amp: document.getElementById('tele-amp'),
     volt: document.getElementById('tele-volt'),
     status: document.getElementById('connection-status'),
-    statusPill: document.getElementById('top-hud'),
+    statusPill: document.getElementById('hw-status-badge'),
     logBox: document.getElementById('system-log'),
     fps: document.getElementById('fps-counter'),
     btnRun: document.getElementById('btn-run'),
@@ -92,6 +92,7 @@ const UI = {
     statusVibration: document.getElementById('status-vibration'),
     // NB2 CHINT Breaker (RS485)
     statusBreaker: document.getElementById('status-breaker'),
+    statusRs485: document.getElementById('status-rs485'),
     nb2Voltage: document.getElementById('nb2-voltage'),
     nb2Current: document.getElementById('nb2-current'),
     nb2Power: document.getElementById('nb2-power'),
@@ -382,6 +383,32 @@ function flushTelemetryToDOM() {
         if (UI.nb2Temp) UI.nb2Temp.textContent = TEL.nb2Temp;
         if (UI.nb2Residual) UI.nb2Residual.textContent = TEL.nb2Residual;
 
+        // ── Tab 2 Live Replica Power Strip flush ────────────────────────
+        const replicaVolt = document.getElementById('model-replica-volt');
+        const replicaAmp = document.getElementById('model-replica-amp');
+        const replicaPwr = document.getElementById('model-replica-pwr');
+        const replicaPF = document.getElementById('model-replica-pf');
+        const nb2Ok = HW.connected && (MQTT_STATE.nb2.rs485Ok || MQTT_STATE.nb2.voltage > 0);
+
+        if (replicaVolt) {
+            replicaVolt.textContent = nb2Ok ? MQTT_STATE.nb2.voltage.toFixed(1) : (HW.connected ? '0.0' : '—');
+            const vn = nb2Ok ? MQTT_STATE.nb2.voltage : 0;
+            replicaVolt.style.color = (vn > 0 && (vn < 180 || vn > 250)) ? 'var(--status-crit)' : 'var(--text-val)';
+        }
+        if (replicaAmp) {
+            replicaAmp.textContent = nb2Ok ? MQTT_STATE.nb2.current.toFixed(3) : (HW.connected ? '0.000' : '—');
+            const an = nb2Ok ? MQTT_STATE.nb2.current : 0;
+            replicaAmp.style.color = an > 10.0 ? 'var(--status-warn)' : an > 15.0 ? 'var(--status-crit)' : 'var(--text-val)';
+        }
+        if (replicaPwr) {
+            replicaPwr.textContent = nb2Ok ? (MQTT_STATE.nb2.activePower / 1000).toFixed(3) : (HW.connected ? '0.000' : '—');
+        }
+        if (replicaPF) {
+            replicaPF.textContent = nb2Ok ? MQTT_STATE.nb2.powerFactor.toFixed(2) : (HW.connected ? '0.00' : '—');
+            const pfn = nb2Ok ? MQTT_STATE.nb2.powerFactor : 0;
+            replicaPF.style.color = (pfn > 0 && pfn < 0.80) ? 'var(--status-warn)' : 'var(--text-val)';
+        }
+
         // Breaker ON/OFF state badge
         if (UI.nb2BreakerState) {
             if (TEL.nb2Rs485Ok) {
@@ -392,6 +419,18 @@ function flushTelemetryToDOM() {
             } else {
                 UI.nb2BreakerState.textContent = 'N/A';
                 UI.nb2BreakerState.className = 'nb2-state-badge nb2-state-na';
+            }
+        }
+        const breakerStateModel = document.getElementById('nb2-breaker-state-model');
+        if (breakerStateModel) {
+            if (TEL.nb2Rs485Ok) {
+                breakerStateModel.textContent = TEL.nb2BreakerOn ? 'ON' : 'OFF';
+                breakerStateModel.className = TEL.nb2BreakerOn
+                    ? 'inspect-status-pill status-healthy'
+                    : 'inspect-status-pill status-warning';
+            } else {
+                breakerStateModel.textContent = 'N/A';
+                breakerStateModel.className = 'inspect-status-pill status-critical';
             }
         }
 
@@ -490,7 +529,8 @@ function updateHwBadge(connected) {
             UI.statusTemp,
             UI.statusWeight,
             UI.statusVibration,
-            UI.statusBreaker
+            UI.statusBreaker,
+            UI.statusRs485
         ];
         resetSensors.forEach(el => {
             if (el) {
@@ -708,6 +748,11 @@ function parseTelemetry(rawString) {
                 UI.statusBreaker.textContent = 'CONNECTED';
                 UI.statusBreaker.className = 'inspect-status-pill status-healthy';
             }
+            if (UI.statusRs485) {
+                const rsOk = (nb2Raw.rs485_ok === true || nb2Raw.rs485_ok == 1);
+                UI.statusRs485.textContent = rsOk ? 'CONNECTED' : 'FAIL';
+                UI.statusRs485.className = rsOk ? 'inspect-status-pill status-healthy' : 'inspect-status-pill status-critical';
+            }
 
             // Decode and display physical breaker faults/alarms
             if (nb2FaultFlags > 0 || nb2AlarmFlags > 0) {
@@ -789,6 +834,10 @@ function parseTelemetry(rawString) {
             if (UI.statusBreaker) {
                 UI.statusBreaker.textContent = 'NO RS485';
                 UI.statusBreaker.className = 'inspect-status-pill status-warning';
+            }
+            if (UI.statusRs485) {
+                UI.statusRs485.textContent = 'DISCONNECTED';
+                UI.statusRs485.className = 'inspect-status-pill status-critical';
             }
         }
 
@@ -943,7 +992,7 @@ function connectMQTT() {
         if (SIM.interval) { clearInterval(SIM.interval); SIM.interval = null; }
         updateHwBadge(true);
         updateSimControlsState();
-        UI.statusPill.classList.add('active');
+        if (UI.statusPill) UI.statusPill.classList.add('active');
         if (UI.status) UI.status.textContent = 'Hardware Mode';
         addLog('Hardware mode active — receiving live ESP32 telemetry JSON via MQTT.', 'success');
     });
@@ -966,7 +1015,7 @@ function connectMQTT() {
             HW.client = null;
             updateHwBadge(false);
             if (UI.status) UI.status.textContent = 'Standby';
-            UI.statusPill.classList.remove('active');
+            if (UI.statusPill) UI.statusPill.classList.remove('active');
             addLog('MQTT disconnected — simulation mode restored.', 'warning');
         }
     });
@@ -1717,14 +1766,8 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
         } else if (currentActiveTab === 'simulation') {
             // ── Tab 3 Simulation belt animation — FULLY INDEPENDENT from Tab 2 ──
             // Source: simEngine.rpm (sim_engine.js isolated physics object).
-            // This NEVER reads window.SIM.rpm, which belongs to Tab 2 (MQTT replica).
-            // simEngine.rpm is driven only by sim_engine.js physicsTick() via its own
-            // targetRpm, accel/decel model, and fault modifiers — zero coupling to Tab 2.
-            if (HW.connected) {
-                // Real hardware connected: simulation is suspended, freeze belt
-                active3dRpm = 0;
-            } else if (typeof simEngine !== 'undefined') {
-                // Read directly from the isolated sim engine — never from SIM.rpm
+            // Independent of hardware connection status.
+            if (typeof simEngine !== 'undefined') {
                 active3dRpm = simEngine.rpm;
             } else {
                 active3dRpm = 0;
@@ -2069,7 +2112,7 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
             clearInterval(stopRampInterval);
             stopRampInterval = null;
         }
-        UI.statusPill.classList.remove('active');
+        if (UI.statusPill) UI.statusPill.classList.remove('active');
 
         // Clear walk preset selection
         [UI.btnWalkSlow, UI.btnWalkMedium, UI.btnWalkFast].forEach(btn => {
@@ -2104,8 +2147,9 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
             }
             if (SIM.isRunning) return;
             SIM.isRunning = true;
-            SIM.targetRpm = parseFloat(UI.inputRpm.value) || 120;
-            UI.statusPill.classList.add('active');
+            const inputVal = UI.inputRpm ? parseFloat(UI.inputRpm.value) : NaN;
+            SIM.targetRpm = !isNaN(inputVal) && inputVal > 0 ? inputVal : 120;
+            if (UI.statusPill) UI.statusPill.classList.add('active');
 
             if (HW.connected) {
                 // Hardware mode: translate RPM setpoint → PWM% and send to ESP32.
@@ -2157,6 +2201,7 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
 
     if (UI.btnSetRpm) {
         UI.btnSetRpm.addEventListener('click', () => {
+            if (!UI.inputRpm) return;
             let val = parseFloat(UI.inputRpm.value);
             if (isNaN(val) || val < 0) val = 0;
             if (val > SIM.maxRpm) val = SIM.maxRpm;
@@ -2204,7 +2249,7 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
 
         HW.lastCommandTime = Date.now();
         SIM.isRunning = true;
-        UI.statusPill.classList.add('active');
+        if (UI.statusPill) UI.statusPill.classList.add('active');
         if (UI.status) UI.status.textContent = 'Hardware Mode';
         addLog(`[HW] Walk preset → ${preset.toUpperCase()} (PWM direct, bypasses RPM math).`, 'success');
 
@@ -2236,7 +2281,7 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
         SIM.voltage = 24.0;
         clearInterval(SIM.interval);
 
-        UI.statusPill.classList.remove('active');
+        if (UI.statusPill) UI.statusPill.classList.remove('active');
         TEL.rpm = '0.0'; TEL.amp = '0.00'; TEL.volt = '24.0';
         TEL.power = '0.000'; TEL.speed = '0.00';
         TEL.dirty = true;
