@@ -619,6 +619,8 @@ function parseTelemetry(rawString) {
 
         const pwm = parseInt(data.speed_percent) || 0;
         const prox = data.e18_active !== undefined ? !!data.e18_active : !!data.sensor_active;
+
+
         const temp = data.temp_c !== undefined && data.temp_c !== null ? parseFloat(data.temp_c) : null;
 
         // Drive the 3D twin directly from live encoder data
@@ -635,7 +637,11 @@ function parseTelemetry(rawString) {
         MQTT_STATE.isStale = false;
 
         // ── NB2 Breaker: Parse real AC power data if present ────────────
-        const nb2Raw = data.nb2 || null;
+        // Support both nested {"nb2": {...}} and flat {"voltage": ...} payloads from ESP
+        let nb2Raw = data.nb2;
+        if (!nb2Raw && data.voltage !== undefined) {
+            nb2Raw = data;
+        }
         const hasNb2 = nb2Raw && (nb2Raw.rs485_ok === true || nb2Raw.rs485_ok == 1 || nb2Raw.voltage !== undefined);
 
         let displayVoltage, displayCurrent, displayPower, displayPF;
@@ -1661,34 +1667,40 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
             const replicaPF = document.getElementById('model-replica-pf');
 
             if (replicaVolt) {
-                const v = nb2Ok ? MQTT_STATE.nb2.voltage : (HW.connected ? parseFloat(TEL.volt) || 0 : '--');
+                const v = nb2Ok ? MQTT_STATE.nb2.voltage : '--';
                 replicaVolt.textContent = v === '--' ? '—' : parseFloat(v).toFixed(1);
-                // Color: red if voltage deviates >15% from rated 220V (AC) or 12V (DC motor)
+                // Color: red if voltage deviates >15% from rated 220V AC
                 if (v !== '--') {
                     const vn = parseFloat(v);
-                    replicaVolt.style.color = (vn < 10 || vn > 250) ? 'var(--status-crit)' : 'var(--text-val)';
+                    replicaVolt.style.color = (vn < 180 || vn > 250) ? 'var(--status-crit)' : 'var(--text-val)';
+                } else {
+                    replicaVolt.style.color = 'var(--text-val)';
                 }
             }
             if (replicaAmp) {
-                const a = nb2Ok ? MQTT_STATE.nb2.current : (HW.connected ? parseFloat(TEL.amp) || 0 : '--');
+                const a = nb2Ok ? MQTT_STATE.nb2.current : '--';
                 replicaAmp.textContent = a === '--' ? '—' : parseFloat(a).toFixed(3);
-                // Color: amber warning if current exceeds rated motor current (1.2A)
+                // Color: amber warning if AC current exceeds normal station draw
                 if (a !== '--') {
                     const an = parseFloat(a);
-                    replicaAmp.style.color = an > 1.5 ? 'var(--status-warn)' : an > 3.0 ? 'var(--status-crit)' : 'var(--text-val)';
+                    replicaAmp.style.color = an > 10.0 ? 'var(--status-warn)' : an > 15.0 ? 'var(--status-crit)' : 'var(--text-val)';
+                } else {
+                    replicaAmp.style.color = 'var(--text-val)';
                 }
             }
             if (replicaPwr) {
-                const p = nb2Ok ? (MQTT_STATE.nb2.activePower / 1000) : (HW.connected ? parseFloat(TEL.power) || 0 : '--');
+                const p = nb2Ok ? (MQTT_STATE.nb2.activePower / 1000) : '--';
                 replicaPwr.textContent = p === '--' ? '—' : parseFloat(p).toFixed(3);
             }
             if (replicaPF) {
-                const pf = nb2Ok ? MQTT_STATE.nb2.powerFactor : (HW.connected ? parseFloat(TEL.pf) || 0 : '--');
+                const pf = nb2Ok ? MQTT_STATE.nb2.powerFactor : '--';
                 replicaPF.textContent = pf === '--' ? '—' : parseFloat(pf).toFixed(2);
                 // Color: amber if PF < 0.80 (poor power factor)
                 if (pf !== '--') {
                     const pfn = parseFloat(pf);
                     replicaPF.style.color = pfn < 0.80 ? 'var(--status-warn)' : 'var(--text-val)';
+                } else {
+                    replicaPF.style.color = 'var(--text-val)';
                 }
             }
 
