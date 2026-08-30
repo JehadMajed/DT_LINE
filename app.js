@@ -636,7 +636,7 @@ function parseTelemetry(rawString) {
 
         // ── NB2 Breaker: Parse real AC power data if present ────────────
         const nb2Raw = data.nb2 || null;
-        const hasNb2 = nb2Raw && nb2Raw.rs485_ok === true;
+        const hasNb2 = nb2Raw && (nb2Raw.rs485_ok === true || nb2Raw.rs485_ok == 1 || nb2Raw.voltage !== undefined);
 
         let displayVoltage, displayCurrent, displayPower, displayPF;
 
