@@ -154,7 +154,7 @@ ControlMode controlMode = CONTROL_MODE_MANUAL; // default: local joystick priori
 
 
 unsigned long rpmIntervalMs         = 1000;
-unsigned long telemetryIntervalMs   = 1000;
+unsigned long telemetryIntervalMs   = 5000;
 unsigned long temperatureIntervalMs = 2000;
 
 

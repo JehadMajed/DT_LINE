@@ -213,13 +213,10 @@ const MOTOR = {
 // Derived: 167 RPM × 8000 ms = 1,336,000 (one UV cycle in exactly 8 s at max RPM)
 const BELT_UV_CONSTANT = 1336000;
 
-// Returns real belt surface speed (m/s) using two-point interpolation
+// Returns real belt surface speed (m/s) calibrated: 167 RPM = 0.1275 m/s
 function rpmToBeltSpeed(rpm) {
-    const p1 = MOTOR.cal[0];
-    const p2 = MOTOR.cal[1];
-    const t = (rpm - p1.rpm) / (p2.rpm - p1.rpm);
-    const lps = p1.lps + t * (p2.lps - p1.lps);
-    return Math.max(0, lps * MOTOR.beltLength);
+    if (!rpm || rpm <= 0) return 0;
+    return (rpm / 167.0) * 0.1275;
 }
 
 const SIM = {
@@ -648,30 +645,32 @@ function parseTelemetry(rawString) {
     try {
         const data = JSON.parse(rawString);
 
-        let baseRpm = parseFloat(data.estimated_rpm ?? data.rpm) || 0;
-
-        // Add artificial +/- 7% tolerance (jitter) to make it look like a real physical sensor
-        if (baseRpm > 0) {
-            const jitter = 1.0 + (Math.random() * 0.14 - 0.07); // 0.93 to 1.07
-            baseRpm *= jitter;
-        }
-        const rpm = baseRpm;
-
         const pwm = parseInt(data.speed_percent) || 0;
+        const dir = (data.dir || 'stop').toLowerCase();
+        const mode = (data.control_mode || 'manual').toLowerCase();
+        const isMoving = (dir === 'fwd' || dir === 'rev' || pwm > 0);
+
+        let rpm = 0.0;
+        if (mode === 'manual') {
+            // Manual mode movement: always set to Medium speed (60% PWM = 100.2 RPM, 0.077 m/s)
+            rpm = isMoving ? 100.2 : 0.0;
+        } else {
+            // Remote mode movement: proportional to commanded PWM% (100% PWM = 167.0 RPM)
+            rpm = isMoving ? (pwm / 100.0) * 167.0 : 0.0;
+        }
+
         const prox = data.e18_active !== undefined ? !!data.e18_active : !!data.sensor_active;
-
-
         const temp = data.temp_c !== undefined && data.temp_c !== null ? parseFloat(data.temp_c) : null;
 
-        // Drive the 3D twin directly from live encoder data
+        // Drive the 3D twin mathematically
         SIM.rpm = rpm;
         SIM.targetRpm = rpm;
-        SIM.isRunning = (rpm > 0.5); // encoder only — PWM is a command, not proof of motion
+        SIM.isRunning = (rpm > 0.5);
 
         // ── Feed MQTT_STATE — the 3D Model tab reads ONLY from here ──────────
         MQTT_STATE.rpm = rpm;
         MQTT_STATE.isRunning = SIM.isRunning;
-        MQTT_STATE.speedPercent = pwm;
+        MQTT_STATE.speedPercent = (mode === 'manual' && isMoving) ? 60 : pwm;
         MQTT_STATE.beltSpeed = rpmToBeltSpeed(rpm);
         MQTT_STATE.lastPacketTime = Date.now();
         MQTT_STATE.isStale = false;
@@ -1000,22 +999,6 @@ function connectMQTT() {
     client.on('message', (topic, payload) => {
         if (topic === MQTT_CFG.topicSub || topic === 'digital_twin/motor/telemetry') {
             parseTelemetry(payload.toString());
-        } else if (topic === 'digital_twin/encoder/telemetry' || topic === 'digital_twin/line_01/encoder/telemetry') {
-            try {
-                const encData = JSON.parse(payload.toString());
-                const delta = encData.delta_count !== undefined ? encData.delta_count : 0;
-                const ppr = encData.ppr || 770;
-                // High-speed 100ms encoder stream (10 Hz)
-                if (Math.abs(delta) > 0 && ppr > 0) {
-                    const computedRpm = (Math.abs(delta) / ppr) * (60000 / 100);
-                    MQTT_STATE.rpm = computedRpm;
-                    MQTT_STATE.beltSpeed = rpmToBeltSpeed(computedRpm);
-                    MQTT_STATE.lastPacketTime = Date.now();
-                    MQTT_STATE.isStale = false;
-                    SIM.rpm = computedRpm;
-                    SIM.isRunning = true;
-                }
-            } catch (e) {}
         }
     });
 
@@ -1661,11 +1644,11 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
 
         if (currentActiveTab === 'model') {
             if (HW.connected) {
-                if (MQTT_STATE.lastPacketTime > 0 && mqttAge > 3000) {
-                    // Stale data: stream dropped mid-session — freeze model
+                if (MQTT_STATE.lastPacketTime > 0 && mqttAge > 12000) {
+                    // Stale data: stream dropped mid-session — freeze model (12 s tolerance for 5 s telemetry)
                     if (!MQTT_STATE.isStale) {
                         MQTT_STATE.isStale = true;
-                        addLog('⚠ MQTT stream stale (>3 s) — 3D replica frozen. Check ESP32.', 'warning');
+                        addLog('⚠ MQTT stream stale (>12 s) — 3D replica frozen. Check ESP32.', 'warning');
                     }
                     active3dRpm = 0;
                 } else {
@@ -1689,7 +1672,7 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                     freshnessEl.style.width = '0%';
                     freshnessEl.style.background = 'var(--border-subtle)';
                 } else {
-                    const freshPct = Math.max(0, 1 - mqttAge / 3000) * 100;
+                    const freshPct = Math.max(0, 1 - mqttAge / 10000) * 100;
                     freshnessEl.style.width = freshPct + '%';
                     freshnessEl.style.background =
                         freshPct > 50 ? 'var(--status-ok)' :
@@ -1819,13 +1802,8 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                 }
             });
 
-            // Belt speed display: two-point empirical interpolation (not pure physics formula)
-            // 167 RPM → 0.1275 m/s, 30 RPM → 0.01275 m/s (non-linear, real motor behaviour)
+            // Belt speed display: accurate calibrated linear speed (m/s)
             let beltSpeed = rpmToBeltSpeed(active3dRpm) * speedMultiplier;
-            if (beltSpeed > 0) {
-                const speedJitter = 1.0 + (Math.random() * 0.02 - 0.01); // +/- 1%
-                beltSpeed *= speedJitter;
-            }
             TEL.speed = beltSpeed.toFixed(3);
             TEL.dirty = true;
 
