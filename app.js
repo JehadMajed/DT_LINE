@@ -126,20 +126,21 @@ const HW = {
 
 function updateNb2Buttons() {
     const rs485Ok = TEL.nb2Rs485Ok;
-    
-    // Overview tab buttons
+
+    // Overview tab buttons — still gated by HW + RS485
     if (UI.btnNb2On)  UI.btnNb2On.disabled  = !HW.connected || !rs485Ok;
     if (UI.btnNb2Off) UI.btnNb2Off.disabled = !HW.connected || !rs485Ok;
-    
-    // 3D Model tab buttons
-    const btnOnModel = document.getElementById('btn-nb2-on-model');
-    const btnOffModel = document.getElementById('btn-nb2-off-model');
+
+    // 3D Model tab buttons — ALWAYS enabled so operator can interact.
+    // A confirm() dialog on the OFF button prevents accidental trips.
+    // Visual opacity reflects connectivity state without blocking access.
+    const btnOnModel     = document.getElementById('btn-nb2-on-model');
+    const btnOffModel    = document.getElementById('btn-nb2-off-model');
     const btnUnlockModel = document.getElementById('btn-nb2-unlock-model');
-    
-    if (btnOnModel) btnOnModel.disabled = !HW.connected || !rs485Ok;
-    if (btnOffModel) btnOffModel.disabled = !HW.connected || !rs485Ok;
-    // Unlock button just needs HW connection (rs485ok not strictly required to just send the unlock packet)
-    if (btnUnlockModel) btnUnlockModel.disabled = !HW.connected;
+    const dimVal = HW.connected ? '1' : '0.55';
+    if (btnOnModel)     { btnOnModel.disabled     = false; btnOnModel.style.opacity     = dimVal; }
+    if (btnOffModel)    { btnOffModel.disabled     = false; btnOffModel.style.opacity    = dimVal; }
+    if (btnUnlockModel) { btnUnlockModel.disabled  = false; btnUnlockModel.style.opacity = dimVal; }
 }
 
 // ── MQTT Replica State ─────────────────────────────────────────────────────
@@ -1042,8 +1043,14 @@ if (UI.btnNb2Off) {
 const btnNb2OffModel = document.getElementById('btn-nb2-off-model');
 if (btnNb2OffModel) {
     btnNb2OffModel.addEventListener('click', () => {
+        // Safety confirm — opening the breaker cuts AC power to the whole station
+        if (!confirm('⚠️ BREAKER OFF WARNING\n\nOpening the breaker will cut power to the entire production station — motor, sensors, and all field equipment will de-energise immediately.\n\nProceed only if the line is stopped and it is safe to do so.\n\nPress OK to open the breaker.')) return;
+        if (!HW.connected) {
+            addLog('[NB2] Not connected to hardware — command NOT sent.', 'warning');
+            return;
+        }
         sendCmdObject({ breaker: 'off' });
-        addLog('[NB2] Sending remote OPEN (breaker OFF) command...', 'warning');
+        addLog('[NB2] ⚠️ Remote OPEN command sent — station power cut.', 'warning');
     });
 }
 // HARD POWER CUT — Emergency breaker trip via NB2 RS485
@@ -1138,6 +1145,39 @@ const createScene = async function () {
     shadowGenerator.setDarkness(0.35);
 
     let kinematics = { pulleys: [], belts: [], boxes: [], shadowGenerator: shadowGenerator };
+
+    // [TAB2-SPARKLINE] Voltage sparkline history — stores last 10 voltage samples.
+    // Used by drawPowerSparkline() to render a mini line chart on Tab 2.
+    // To remove: delete this declaration, drawPowerSparkline(), and the canvas in index.html.
+    const powerSparklineHistory = [];
+
+    function drawPowerSparkline(data) {
+        const canvas = document.getElementById('model-sparkline-volt');
+        if (!canvas || data.length < 2) return;
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width;
+        const H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
+        const minV = Math.min(...data) - 0.5;
+        const maxV = Math.max(...data) + 0.5;
+        const range = maxV - minV || 1;
+        ctx.beginPath();
+        data.forEach((v, i) => {
+            const x = (i / (data.length - 1)) * W;
+            const y = H - ((v - minV) / range) * H;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = '#0284C7';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // Fill gradient
+        ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+        const grad = ctx.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, 'rgba(2,132,199,0.25)');
+        grad.addColorStop(1, 'rgba(2,132,199,0)');
+        ctx.fillStyle = grad;
+        ctx.fill();
+    }
 
     addLog('Loading GLB Asset via Babylon.js...');
     const result = await BABYLON.SceneLoader.ImportMeshAsync('', 'assets/', 'Conveyor_Twin_v1.glb', scene);
@@ -1406,21 +1446,46 @@ function getComponentMetadata(meshName) {
 }
 
 function updateInspector(mesh) {
+    // ── Tab 2 inspector panel ──
     if (!mesh) {
-        if (UI.inspectorIdle) UI.inspectorIdle.classList.remove('hidden');
+        if (UI.inspectorIdle)    UI.inspectorIdle.classList.remove('hidden');
         if (UI.inspectorDetails) UI.inspectorDetails.classList.add('hidden');
-        return;
+    } else {
+        const meta = getComponentMetadata(mesh.name);
+        if (UI.inspectName)     UI.inspectName.textContent     = meta.name;
+        if (UI.inspectCategory) UI.inspectCategory.textContent = meta.category;
+        if (UI.inspectSpecs)    UI.inspectSpecs.textContent    = meta.specs;
+        if (UI.inspectStatus) {
+            UI.inspectStatus.textContent = meta.status;
+            UI.inspectStatus.className   = `inspect-status-pill ${meta.healthClass}`;
+        }
+        if (UI.inspectorIdle)    UI.inspectorIdle.classList.add('hidden');
+        if (UI.inspectorDetails) UI.inspectorDetails.classList.remove('hidden');
     }
-    const meta = getComponentMetadata(mesh.name);
-    if (UI.inspectName) UI.inspectName.textContent = meta.name;
-    if (UI.inspectCategory) UI.inspectCategory.textContent = meta.category;
-    if (UI.inspectSpecs) UI.inspectSpecs.textContent = meta.specs;
-    if (UI.inspectStatus) {
-        UI.inspectStatus.textContent = meta.status;
-        UI.inspectStatus.className = `inspect-status-pill ${meta.healthClass}`;
+
+    // [SIM-INSPECTOR] Tab 3 inspector panel — mirrors Tab 2 using separate DOM IDs.
+    // The 3D canvas is shared, so pointer clicks fire for both tabs; we show the
+    // correct panel based on which tab is currently active.
+    // To remove: delete this block and the inspector HTML in Tab 3 (index.html).
+    const simDetails  = document.getElementById('inspector-details-sim');
+    const simName     = document.getElementById('inspect-name-sim');
+    const simCategory = document.getElementById('inspect-category-sim');
+    const simSpecs    = document.getElementById('inspect-specs-sim');
+    const simStatus   = document.getElementById('inspect-status-sim');
+
+    if (!mesh) {
+        if (simDetails) simDetails.classList.add('hidden');
+    } else {
+        const meta = getComponentMetadata(mesh.name);
+        if (simName)     simName.textContent     = meta.name;
+        if (simCategory) simCategory.textContent = meta.category;
+        if (simSpecs)    simSpecs.textContent    = meta.specs;
+        if (simStatus) {
+            simStatus.textContent = meta.status;
+            simStatus.className   = `inspect-status-pill ${meta.healthClass}`;
+        }
+        if (simDetails) simDetails.classList.remove('hidden');
     }
-    if (UI.inspectorIdle) UI.inspectorIdle.classList.add('hidden');
-    if (UI.inspectorDetails) UI.inspectorDetails.classList.remove('hidden');
 }
 
 const btnCloseInspector = document.getElementById('btn-close-inspector');
@@ -1433,6 +1498,20 @@ if (btnCloseInspector) {
         updateInspector(null);
     });
 }
+
+// [SIM-INSPECTOR] Close button for the Tab 3 inspector panel.
+// To remove: delete this block and the inspector HTML in Tab 3 (index.html).
+const btnCloseInspectorSim = document.getElementById('btn-close-inspector-sim');
+if (btnCloseInspectorSim) {
+    btnCloseInspectorSim.addEventListener('click', () => {
+        if (typeof SIM !== 'undefined' && SIM.selectedMesh) {
+            SIM.selectedMesh.renderOutline = false;
+            SIM.selectedMesh = null;
+        }
+        updateInspector(null);
+    });
+}
+
 
 function animateCameraTarget(camera, newTarget, scene) {
     BABYLON.Animation.CreateAndStartAnimation(
@@ -1571,27 +1650,93 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
             const replicaCount = document.getElementById('model-replica-count');
             if (replicaCount) replicaCount.textContent = MQTT_STATE.pieceCount.toString();
 
-        } else if (currentActiveTab === 'simulation') {
-            // Simulation sandbox — user-driven, only when no real hardware
-            if (!HW.connected) {
-                // Physics handled by sim_engine.js
-            } else {
-                SIM.rpm = 0; // HW connected: simulation suspended
+            // [TAB2-POWER] Live Replica power strip — voltage / current / power / PF.
+            // These elements are added in index.html inside the 'Live Replica Status' card.
+            // Source: MQTT_STATE.nb2 when RS485 OK, otherwise simulated TEL values.
+            // To remove this feature: delete this block AND the four tele-items in index.html.
+            const nb2Ok = HW.connected && MQTT_STATE.nb2.rs485Ok;
+            const replicaVolt = document.getElementById('model-replica-volt');
+            const replicaAmp  = document.getElementById('model-replica-amp');
+            const replicaPwr  = document.getElementById('model-replica-pwr');
+            const replicaPF   = document.getElementById('model-replica-pf');
+
+            if (replicaVolt) {
+                const v = nb2Ok ? MQTT_STATE.nb2.voltage : (HW.connected ? parseFloat(TEL.volt) || 0 : '--');
+                replicaVolt.textContent = v === '--' ? '—' : parseFloat(v).toFixed(1);
+                // Color: red if voltage deviates >15% from rated 220V (AC) or 12V (DC motor)
+                if (v !== '--') {
+                    const vn = parseFloat(v);
+                    replicaVolt.style.color = (vn < 10 || vn > 250) ? 'var(--status-crit)' : 'var(--text-val)';
+                }
             }
-            active3dRpm = SIM.rpm;
+            if (replicaAmp) {
+                const a = nb2Ok ? MQTT_STATE.nb2.current : (HW.connected ? parseFloat(TEL.amp) || 0 : '--');
+                replicaAmp.textContent = a === '--' ? '—' : parseFloat(a).toFixed(3);
+                // Color: amber warning if current exceeds rated motor current (1.2A)
+                if (a !== '--') {
+                    const an = parseFloat(a);
+                    replicaAmp.style.color = an > 1.5 ? 'var(--status-warn)' : an > 3.0 ? 'var(--status-crit)' : 'var(--text-val)';
+                }
+            }
+            if (replicaPwr) {
+                const p = nb2Ok ? (MQTT_STATE.nb2.activePower / 1000) : (HW.connected ? parseFloat(TEL.power) || 0 : '--');
+                replicaPwr.textContent = p === '--' ? '—' : parseFloat(p).toFixed(3);
+            }
+            if (replicaPF) {
+                const pf = nb2Ok ? MQTT_STATE.nb2.powerFactor : (HW.connected ? parseFloat(TEL.pf) || 0 : '--');
+                replicaPF.textContent = pf === '--' ? '—' : parseFloat(pf).toFixed(2);
+                // Color: amber if PF < 0.80 (poor power factor)
+                if (pf !== '--') {
+                    const pfn = parseFloat(pf);
+                    replicaPF.style.color = pfn < 0.80 ? 'var(--status-warn)' : 'var(--text-val)';
+                }
+            }
+
+            // [TAB2-SPARKLINE] Push voltage history for mini sparkline chart.
+            // powerSparklineHistory is declared near the top of initBabylon().
+            // To remove sparkline: delete this push + the canvas in index.html.
+            if (nb2Ok || HW.connected) {
+                const vPush = nb2Ok ? MQTT_STATE.nb2.voltage : parseFloat(TEL.volt) || 0;
+                powerSparklineHistory.push(vPush);
+                if (powerSparklineHistory.length > 10) powerSparklineHistory.shift();
+                drawPowerSparkline(powerSparklineHistory);
+            }
+
+        } else if (currentActiveTab === 'simulation') {
+            // ── Tab 3 Simulation belt animation — FULLY INDEPENDENT from Tab 2 ──
+            // Source: simEngine.rpm (sim_engine.js isolated physics object).
+            // This NEVER reads window.SIM.rpm, which belongs to Tab 2 (MQTT replica).
+            // simEngine.rpm is driven only by sim_engine.js physicsTick() via its own
+            // targetRpm, accel/decel model, and fault modifiers — zero coupling to Tab 2.
+            if (HW.connected) {
+                // Real hardware connected: simulation is suspended, freeze belt
+                active3dRpm = 0;
+            } else if (typeof simEngine !== 'undefined') {
+                // Read directly from the isolated sim engine — never from SIM.rpm
+                active3dRpm = simEngine.rpm;
+            } else {
+                active3dRpm = 0;
+            }
         } else {
             // Overview / Optimization tabs — canvas hidden, freeze
             active3dRpm = 0;
         }
 
         // ── Animate belt, pulleys and GLB groups using active3dRpm ────────────
+        // active3dRpm source:
+        //   Tab 2 (3D Model)  → MQTT_STATE.rpm  (real hardware only, frozen in sim)
+        //   Tab 3 (Simulation) → simEngine.rpm  (isolated physics, no HW coupling)
+        //   Other tabs         → 0 (canvas hidden)
         if (Math.abs(active3dRpm) > 0.1) {
             const rotationStep = ((active3dRpm * Math.PI) / 30) * delta;
             kinematics.pulleys.forEach(pulley => {
                 pulley.rotate(BABYLON.Axis.Z, rotationStep, BABYLON.Space.LOCAL);
             });
 
-            const speedMultiplier = SIM.faults.beltOverload ? 0.35 : 1.0;
+            // Fault multiplier: Tab 3 uses simEngine.faults; Tab 2 uses SIM.faults
+            const activeFaults = (currentActiveTab === 'simulation' && typeof simEngine !== 'undefined')
+                ? simEngine.faults : SIM.faults;
+            const speedMultiplier = activeFaults.beltOverload ? 0.35 : 1.0;
 
             // UV scroll: calibrated from real measurement (167 RPM → 8 s per loop)
             // BELT_UV_CONSTANT = 167 × 8000 = 1,336,000
@@ -1982,7 +2127,10 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
             let rampRpm = SIM.rpm;
             stopRampInterval = setInterval(() => {
                 rampRpm -= 20; // Decelerate by 20 RPM per step
-                if (rampRpm <= 10) {
+                // [STOP-FIX] Threshold was <=10, which caused the display to
+                // show a residual ~16 RPM (last ramp step before trigger).
+                // Changed to <=0 so the motor always ramps fully to zero.
+                if (rampRpm <= 0) {
                     completeStop();
                 } else {
                     SIM.targetRpm = rampRpm;

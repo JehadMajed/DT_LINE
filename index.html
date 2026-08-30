@@ -252,7 +252,40 @@
                                 <span class="tele-label">Pieces Counted</span>
                                 <span class="tele-val" id="model-replica-count">0</span>
                             </div>
+                            <!-- [TAB2-POWER] Voltage reading — shows NB2 breaker V when RS485 OK, else motor V -->
+                            <!-- To remove: delete this div and corresponding JS block in app.js [TAB2-POWER] -->
+                            <div class="tele-item">
+                                <span class="tele-label">Voltage</span>
+                                <span class="tele-val"><span id="model-replica-volt">—</span> <span
+                                        class="tele-unit">V</span></span>
+                            </div>
+                            <!-- [TAB2-POWER] Current reading — color turns amber above rated 1.2A -->
+                            <div class="tele-item">
+                                <span class="tele-label">Current</span>
+                                <span class="tele-val"><span id="model-replica-amp">—</span> <span
+                                        class="tele-unit">A</span></span>
+                            </div>
+                            <!-- [TAB2-POWER] Active power reading in kW -->
+                            <div class="tele-item">
+                                <span class="tele-label">Power</span>
+                                <span class="tele-val"><span id="model-replica-pwr">—</span> <span
+                                        class="tele-unit">kW</span></span>
+                            </div>
+                            <!-- [TAB2-POWER] Power-factor badge — color turns amber below 0.80 -->
+                            <div class="tele-item">
+                                <span class="tele-label">Power Factor</span>
+                                <span class="tele-val"><span id="model-replica-pf">—</span></span>
+                            </div>
+                            <!-- [TAB2-SPARKLINE] Mini voltage trend for last 10 readings -->
+                            <!-- To remove: delete this div and the [TAB2-SPARKLINE] block in app.js -->
+                            <div class="tele-item"
+                                style="flex-direction:column;align-items:flex-start;gap:4px;padding-top:8px;">
+                                <span class="tele-label" style="margin-bottom:2px;">Voltage Readings (last 10)</span>
+                                <canvas id="model-sparkline-volt" width="120" height="32"
+                                    style="border-radius:4px;background:rgba(2,132,199,0.05);display:block;"></canvas>
+                            </div>
                         </div>
+
                     </div>
                 </div>
 
@@ -361,13 +394,29 @@
                                 <span id="nb2-breaker-state-model" class="state-pill"
                                     style="font-size:10px; margin-left:8px;">OFF</span>
                             </div>
-                            <div style="display:flex;gap:8px;margin-bottom:12px;">
-                                <button id="btn-nb2-unlock-model" class="cmd-btn" style="width:auto;padding:0 12px;height:32px;font-size:12px;" disabled>Unlock</button>
+                            <div style="display:flex;gap:8px;margin-bottom:0;width:100%;">
+                                <button id="btn-nb2-unlock-model" class="cmd-btn"
+                                    style="flex:1;height:36px;font-size:12px;font-weight:600;border-color:var(--status-warn);color:var(--status-warn);">
+                                    Unlock</button>
                                 <button id="btn-nb2-on-model" class="cmd-btn"
-                                    style="width:auto;padding:0 16px;height:32px;font-size:12px;" disabled>ON</button>
+                                    style="flex:1;height:36px;font-size:12px;font-weight:600;border-color:var(--status-ok);color:var(--status-ok);">ON
+                                    (Close)</button>
                                 <button id="btn-nb2-off-model" class="cmd-btn"
-                                    style="width:auto;padding:0 16px;height:32px;font-size:12px;border-color:var(--danger);color:var(--danger);"
-                                    disabled>OFF</button>
+                                    style="flex:1;height:36px;font-size:12px;font-weight:600;border-color:var(--danger);color:var(--danger);">OFF
+                                    (Open)</button>
+                            </div>
+
+                            <!-- Breaker safety warning banner -->
+                            <div style="margin-top:10px;padding:10px 12px;border-radius:6px;
+                                        background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);
+                                        display:flex;align-items:flex-start;gap:8px;">
+                                <span style="font-size:16px;line-height:1;flex-shrink:0;margin-top:1px;">⚠️</span>
+                                <p
+                                    style="margin:0;font-size:11.5px;line-height:1.5;color:var(--danger);font-weight:500;">
+                                    Opening the breaker will <strong>immediately cut AC power</strong> to the entire
+                                    production station — motor, sensors and all field equipment will de-energise.
+                                    Ensure the line is fully stopped before proceeding.
+                                </p>
                             </div>
 
                             <!-- Camera -->
@@ -416,7 +465,33 @@
                             style="position:relative; height:350px; background:var(--viewport-bg); display:flex; align-items:center; justify-content:center; border-bottom:1px solid var(--viewport-border); overflow:hidden;">
                             <span style="color:var(--text-muted);font-size:13px; z-index:0;">3D canvas renders
                                 here</span>
+
+                            <!-- Floating Component Inspector Overlay (Simulation Tab) -->
+                            <!-- Mirrors the Tab 2 inspector. Driven by updateInspector() when currentActiveTab === 'simulation' -->
+                            <!-- To remove: delete this div and the [SIM-INSPECTOR] block in app.js -->
+                            <div id="inspector-details-sim" class="hidden"
+                                style="position:absolute; top:16px; right:16px; background:rgba(255,255,255,0.95); backdrop-filter:blur(8px); border:1px solid var(--border); border-radius:var(--radius-md); padding:16px; width:260px; box-shadow:0 8px 24px rgba(0,0,0,0.1); z-index:10; pointer-events:auto;">
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+                                    <span class="ctrl-title"
+                                        style="font-size:12px; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted);">Component
+                                        Inspector</span>
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <span id="inspect-status-sim" class="state-pill" style="font-size:10px;">--</span>
+                                        <button id="btn-close-inspector-sim"
+                                            style="background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-size:20px; line-height:1; padding:0; margin:0; display:flex; align-items:center; justify-content:center; width:24px; height:24px;"
+                                            title="Hide Inspector">−</button>
+                                    </div>
+                                </div>
+                                <div style="font-size:16px; font-weight:700; color:var(--heading); margin-bottom:4px; line-height:1.2;"
+                                    id="inspect-name-sim">--</div>
+                                <div style="font-size:12px; color:var(--primary); font-weight:600; margin-bottom:12px;"
+                                    id="inspect-category-sim">--</div>
+                                <div style="font-size:13px; color:var(--text); line-height:1.4;" id="inspect-specs-sim">--
+                                </div>
+                            </div>
+
                         </div>
+
                     </div>
 
                     <!-- Gauges -->
