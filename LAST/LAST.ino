@@ -452,13 +452,7 @@ void evaluateRPM() {
   unsigned long elapsed = now - lastRpmTime;
 
 
-  if (targetSpeedPercent == 0 && targetDirection == 0) {
-    currentRPM = 0.0f;
-    lastRpmTime = now;
-    return;
-  }
-
-
+  // Calculate real physical RPM from encoder pulses
   float rawRPM = 0.0f;
 
 

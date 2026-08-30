@@ -987,8 +987,8 @@ function connectMQTT() {
         MQTT_STATE.lastPacketTime = 0;
         MQTT_STATE.isStale = false;
 
-        client.subscribe(MQTT_CFG.topicSub, { qos: 0 });
-        // Suspend simulation interval while hardware is active
+        client.subscribe('digital_twin/#', { qos: 0 });
+        // Suspend synthetic background interval while hardware is active
         if (SIM.interval) { clearInterval(SIM.interval); SIM.interval = null; }
         updateHwBadge(true);
         updateSimControlsState();
@@ -998,7 +998,25 @@ function connectMQTT() {
     });
 
     client.on('message', (topic, payload) => {
-        if (topic === MQTT_CFG.topicSub) parseTelemetry(payload.toString());
+        if (topic === MQTT_CFG.topicSub || topic === 'digital_twin/motor/telemetry') {
+            parseTelemetry(payload.toString());
+        } else if (topic === 'digital_twin/encoder/telemetry' || topic === 'digital_twin/line_01/encoder/telemetry') {
+            try {
+                const encData = JSON.parse(payload.toString());
+                const delta = encData.delta_count !== undefined ? encData.delta_count : 0;
+                const ppr = encData.ppr || 770;
+                // High-speed 100ms encoder stream (10 Hz)
+                if (Math.abs(delta) > 0 && ppr > 0) {
+                    const computedRpm = (Math.abs(delta) / ppr) * (60000 / 100);
+                    MQTT_STATE.rpm = computedRpm;
+                    MQTT_STATE.beltSpeed = rpmToBeltSpeed(computedRpm);
+                    MQTT_STATE.lastPacketTime = Date.now();
+                    MQTT_STATE.isStale = false;
+                    SIM.rpm = computedRpm;
+                    SIM.isRunning = true;
+                }
+            } catch (e) {}
+        }
     });
 
     client.on('error', (err) => {
