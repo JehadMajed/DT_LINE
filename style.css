@@ -682,323 +682,6 @@ model-viewer {
   font-variant-numeric: tabular-nums;
 }
 
-/* Camera Overlay Box — Anchored to LEFT side (No Overlap) */
-.cam-overlay-box {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  width: 450px;
-  max-width: calc(100% - 24px);
-  height: auto;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-md);
-  padding: 10px 12px 12px 12px;
-  z-index: 10;
-  overflow: hidden;
-  transition: all 0.2s ease-in-out;
-}
-
-.cam-overlay-hdr {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 8px;
-  flex-shrink: 0;
-}
-
-/* Pulsing REC dot indicator */
-.camfeed-rec-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #10B981;
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
-  animation: rec-pulse 1.8s ease-in-out infinite;
-  flex-shrink: 0;
-}
-
-@keyframes rec-pulse {
-  0% { transform: scale(0.95); opacity: 0.7; box-shadow: 0 0 4px rgba(16, 185, 129, 0.4); }
-  50% { transform: scale(1.15); opacity: 1; box-shadow: 0 0 10px rgba(16, 185, 129, 0.8); }
-  100% { transform: scale(0.95); opacity: 0.7; box-shadow: 0 0 4px rgba(16, 185, 129, 0.4); }
-}
-
-.cam-overlay-badge {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--heading);
-  letter-spacing: 0.01em;
-}
-
-.cam-select-sm {
-  font-size: 11px;
-  font-weight: 500;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 2px 6px;
-  background: var(--surface-subtle);
-  color: var(--text);
-  outline: none;
-  cursor: pointer;
-  height: 24px;
-}
-
-/* Video Viewport Stage */
-.camfeed-viewport {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  height: auto;
-  background: #060d1a;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-}
-
-.cam-media {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-#cam-feed-iframe {
-  pointer-events: none;
-}
-
-.cam-media.hidden,
-.cam-standby-msg.hidden,
-#cam-standby.hidden {
-  display: none !important;
-}
-
-/* Loading & Error Overlays */
-.camfeed-loading {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  color: #94A3B8;
-  font-size: 0.75rem;
-  background: #060d1a;
-  z-index: 5;
-}
-
-.camfeed-spinner {
-  width: 26px;
-  height: 26px;
-  border: 2px solid rgba(255, 255, 255, 0.15);
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: cam-spin 0.8s linear infinite;
-}
-
-@keyframes cam-spin {
-  to { transform: rotate(360deg); }
-}
-
-.camfeed-error {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  color: #94A3B8;
-  font-size: 0.75rem;
-  background: rgba(6, 13, 26, 0.88);
-  z-index: 5;
-  text-align: center;
-}
-
-.camfeed-error-title {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #F8FAFC;
-}
-
-.camfeed-error-sub {
-  font-size: 0.7rem;
-  color: #64748B;
-}
-
-/* Controls Toolbar (Zoom + D-pad) */
-.camfeed-controls {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 4px 0 4px;
-  gap: 1rem;
-  flex-shrink: 0;
-}
-
-.camfeed-zoom-group {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex: 1;
-}
-
-.camfeed-zoom-track {
-  flex: 1;
-  height: 4px;
-  background: var(--border);
-  border-radius: 2px;
-  position: relative;
-  overflow: hidden;
-}
-
-.camfeed-zoom-fill {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  background: var(--primary);
-  border-radius: 2px;
-  width: 0%;
-  transition: width 0.15s ease;
-}
-
-.cam-ctrl-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-muted);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.12s, border-color 0.12s, color 0.12s, transform 0.08s;
-}
-
-.cam-ctrl-btn:hover {
-  background: var(--primary-soft);
-  border-color: var(--primary);
-  color: var(--primary);
-}
-
-.cam-ctrl-btn:active {
-  transform: scale(0.92);
-}
-
-.cam-ctrl-btn-sm {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 24px;
-  padding: 0 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-muted);
-  font-size: 0.68rem;
-  font-weight: 600;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.12s, color 0.12s;
-}
-
-.cam-ctrl-btn-sm:hover {
-  background: var(--surface-subtle);
-  color: var(--heading);
-}
-
-/* D-pad 3x3 Grid */
-.camfeed-dpad {
-  display: grid;
-  grid-template-areas:
-    ".    up    ."
-    "left ctr   right"
-    ".    down  .";
-  grid-template-columns: 26px 26px 26px;
-  grid-template-rows: 26px 26px 26px;
-  gap: 2px;
-  flex-shrink: 0;
-}
-
-.dpad-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: background 0.1s, color 0.1s, transform 0.08s;
-}
-
-.dpad-btn:hover {
-  background: var(--primary-soft);
-  border-color: var(--primary);
-  color: var(--primary);
-}
-
-.dpad-btn:active {
-  transform: scale(0.88);
-  background: var(--primary-soft);
-}
-
-.dpad-up { grid-area: up; }
-.dpad-left { grid-area: left; }
-.dpad-right { grid-area: right; }
-.dpad-down { grid-area: down; }
-
-.dpad-center {
-  grid-area: ctr;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--surface-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  position: relative;
-}
-
-.dpad-center::after {
-  content: "";
-  width: 4px;
-  height: 4px;
-  background: var(--border-strong);
-  border-radius: 50%;
-}
-
-.cam-standby-msg {
-  padding: 12px 8px;
-  text-align: center;
-}
-
-.standby-title-sm {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-}
-
-.standby-sub-sm {
-  font-size: 11px;
-  color: var(--text-muted);
-  line-height: 1.4;
-}
-
 /* =====================================================================
    D. OPERATIONAL STRIPS (UNDER 3D VIEWPORT)
    ===================================================================== */
@@ -2084,12 +1767,10 @@ model-viewer {
     height: 540px;
   }
 
-  /* Keep camera box square & touch-optimized for tablet screens */
+  /* Narrower docked camera panel on tablet screens */
   .cam-overlay-box {
-    width: 280px;
-    height: 280px;
-    top: 12px;
-    right: 12px;
+    flex-basis: 260px;
+    width: 260px;
     padding: 8px;
   }
 
@@ -2135,9 +1816,25 @@ model-viewer {
     height: 480px;
   }
 
+  /* Stack the camera panel below the 3D canvas instead of squeezing it
+     into a narrow side column — keeps both fully visible, no overlap. */
+  #model-viewport-placeholder {
+    flex-direction: column;
+    height: auto !important;
+  }
+
+  #model-canvas-wrap {
+    height: 320px;
+    flex: 0 0 auto;
+  }
+
   .cam-overlay-box {
-    width: 220px;
+    flex: 0 0 220px;
+    width: 100%;
+    max-width: 100%;
     height: 220px;
+    border-left: none;
+    border-top: 1px solid var(--border);
   }
 
   .chart-wrap,
@@ -2182,14 +1879,15 @@ model-viewer {
     height: 400px;
   }
 
-  /* Compact square optical feed for phone viewports */
+  #model-canvas-wrap {
+    height: 260px;
+  }
+
+  /* Compact stacked camera panel for phone viewports */
   .cam-overlay-box {
-    width: 150px;
-    height: 150px;
-    top: 8px;
-    right: 8px;
+    flex: 0 0 170px;
+    height: 170px;
     padding: 6px;
-    border-radius: var(--radius-sm);
   }
 
   .cam-overlay-hdr {
@@ -2270,8 +1968,8 @@ model-viewer {
   }
 
   .cam-overlay-box {
-    width: 130px;
-    height: 130px;
+    flex-basis: 150px;
+    height: 150px;
   }
 }
 
@@ -2423,7 +2121,223 @@ model-viewer {
 #canvas3d { width: 100%; height: 100%; outline: none; background: transparent; }
 #canvas3d.hidden { display: none !important; }
 #model-viewport-placeholder { position: relative; }
-#model-viewport-placeholder > #canvas3d { position: absolute; inset: 0; }
+#model-canvas-wrap > #canvas3d { position: absolute; inset: 0; }
 
 .hidden { display: none !important; }
 
+/* Live Camera Feed — docked sidebar panel inside #model-viewport-placeholder.
+   A flex sibling of #model-canvas-wrap (not absolutely positioned), so it
+   always reserves its own space and never overlaps the 3D canvas or the
+   Component Inspector overlay. */
+.cam-overlay-box {
+  position: relative;
+  flex: 0 0 320px;
+  width: 320px;
+  max-width: 40%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  padding: 10px 12px 12px 12px;
+  overflow-y: auto;
+  transition: flex-basis 0.2s ease-in-out, width 0.2s ease-in-out;
+}
+
+.cam-overlay-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.camfeed-rec-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10B981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+  animation: rec-pulse 1.8s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes rec-pulse {
+  0% { transform: scale(0.95); opacity: 0.7; box-shadow: 0 0 4px rgba(16, 185, 129, 0.4); }
+  50% { transform: scale(1.15); opacity: 1; box-shadow: 0 0 10px rgba(16, 185, 129, 0.8); }
+  100% { transform: scale(0.95); opacity: 0.7; box-shadow: 0 0 4px rgba(16, 185, 129, 0.4); }
+}
+
+.cam-overlay-badge {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--heading);
+  letter-spacing: 0.01em;
+}
+
+.camfeed-viewport {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  height: auto;
+  background: #060d1a;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+}
+
+.cam-media {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border: none;
+}
+
+.camfeed-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 4px 0 4px;
+  gap: 1rem;
+  flex-shrink: 0;
+}
+
+.camfeed-zoom-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+}
+
+.camfeed-zoom-track {
+  flex: 1;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+}
+
+.camfeed-zoom-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--primary);
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.15s ease;
+}
+
+.cam-ctrl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, transform 0.08s;
+}
+
+.cam-ctrl-btn:hover {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.cam-ctrl-btn:active {
+  transform: scale(0.92);
+}
+
+.cam-ctrl-btn-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s;
+}
+
+.cam-ctrl-btn-sm:hover {
+  background: var(--surface-subtle);
+  color: var(--heading);
+}
+
+.camfeed-dpad {
+  display: grid;
+  grid-template-areas:
+    ".    up    ."
+    "left ctr   right"
+    ".    down  .";
+  grid-template-columns: 26px 26px 26px;
+  grid-template-rows: 26px 26px 26px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.dpad-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, transform 0.08s;
+}
+
+.dpad-btn:hover {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.dpad-btn:active {
+  transform: scale(0.88);
+  background: var(--primary-soft);
+}
+
+.dpad-up { grid-area: up; }
+.dpad-left { grid-area: left; }
+.dpad-right { grid-area: right; }
+.dpad-down { grid-area: down; }
+
+.dpad-center {
+  grid-area: ctr;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  position: relative;
+}
+
+.dpad-center::after {
+  content: "";
+  width: 4px;
+  height: 4px;
+  background: var(--border-strong);
+  border-radius: 50%;
+}

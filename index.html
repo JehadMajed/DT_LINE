@@ -197,30 +197,91 @@
 
                         <!-- Babylon canvas shown here via JS -->
                         <div id="model-viewport-placeholder"
-                            style="position:relative; height:clamp(300px,calc(100vh - 320px),500px); background:var(--viewport-bg); display:flex; align-items:center; justify-content:center; border-bottom:1px solid var(--viewport-border); overflow:hidden;">
-                            <span style="color:var(--text-muted);font-size:13px; z-index:0;">3D canvas renders
-                                here</span>
+                            style="position:relative; height:clamp(300px,calc(100vh - 320px),500px); background:var(--viewport-bg); display:flex; flex-direction:row; align-items:stretch; justify-content:center; border-bottom:1px solid var(--viewport-border); overflow:hidden;">
 
-                            <!-- Floating Component Inspector Overlay -->
-                            <div id="inspector-details" class="hidden"
-                                style="position:absolute; top:16px; right:16px; background:rgba(255,255,255,0.95); backdrop-filter:blur(8px); border:1px solid var(--border); border-radius:var(--radius-md); padding:16px; width:260px; box-shadow:0 8px 24px rgba(0,0,0,0.1); z-index:10; pointer-events:auto;">
-                                <div
-                                    style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
-                                    <span class="ctrl-title"
-                                        style="font-size:12px; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted);">Component
-                                        Inspector</span>
-                                    <div style="display:flex; align-items:center; gap:8px;">
-                                        <span id="inspect-status" class="state-pill" style="font-size:10px;">--</span>
-                                        <button id="btn-close-inspector"
-                                            style="background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-size:20px; line-height:1; padding:0; margin:0; display:flex; align-items:center; justify-content:center; width:24px; height:24px;"
-                                            title="Hide Inspector">−</button>
+                            <div id="model-canvas-wrap" style="position:relative; flex:1 1 auto; min-width:0; height:100%; display:flex; align-items:center; justify-content:center;">
+                                <span style="color:var(--text-muted);font-size:13px; z-index:0;">3D canvas renders
+                                    here</span>
+
+                                <div class="viewer-overlay">
+                                    <button class="overlay-chip" id="cam-show-btn"
+                                        style="cursor: pointer; font-weight: 600; display: none; align-items: center; gap: 6px;">
+                                        <span style="display:inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--primary);"></span>
+                                        <span class="oc-val" style="color: var(--primary);">Show Camera Feed</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- LIVE CAMERA FEED — docked sidebar panel, never overlaps the canvas -->
+                            <div class="cam-overlay-box" id="cam-overlay-box">
+                                <div class="cam-overlay-hdr">
+                                    <div style="display:flex; align-items:center; gap:0.5rem;">
+                                        <span class="camfeed-rec-dot" id="camfeed-rec-dot"></span>
+                                        <span class="cam-overlay-badge">Live Optical Feed</span>
+                                        <span class="cam-overlay-status" id="cam-status-text" style="display:none;">Unavailable</span>
+                                    </div>
+                                    <div style="display: flex; gap: 6px; margin-left: auto; align-items: center;">
+                                        <button class="log-toggle" id="btn-camfeed-toggle" title="Hide Camera Feed" style="width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-muted); cursor:pointer;">
+                                            <svg id="camfeed-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none"
+                                                xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M2 4L6 8L10 4" stroke="currentColor" stroke-width="1.5"
+                                                    stroke-linecap="round" stroke-linejoin="round" />
+                                            </svg>
+                                        </button>
                                     </div>
                                 </div>
-                                <div style="font-size:16px; font-weight:700; color:var(--heading); margin-bottom:4px; line-height:1.2;"
-                                    id="inspect-name">--</div>
-                                <div style="font-size:12px; color:var(--primary); font-weight:600; margin-bottom:12px;"
-                                    id="inspect-category">--</div>
-                                <div style="font-size:13px; color:var(--text); line-height:1.4;" id="inspect-specs">--
+                                <div id="camfeed-body" style="width:100%; display:flex; flex-direction:column; gap:0; flex-shrink:0;">
+                                    <div class="camfeed-viewport" id="camfeed-viewport">
+                                        <div id="cam-zoom-wrapper" style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; transform-origin: center center; overflow:hidden;">
+                                            <iframe id="cam-feed-iframe" class="cam-media" src="http://192.168.1.102:8889/line_01/" title="Live Camera Stream"
+                                                allow="autoplay; fullscreen" scrolling="no" muted
+                                                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+                                        </div>
+                                    </div>
+                                    <div class="camfeed-controls">
+                                        <div class="camfeed-zoom-group">
+                                            <button id="cam-zoom-in" class="cam-ctrl-btn" title="Zoom In">
+                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                                            </button>
+                                            <div class="camfeed-zoom-track">
+                                                <div class="camfeed-zoom-fill" id="camfeed-zoom-fill" style="width:0%;"></div>
+                                            </div>
+                                            <button id="cam-zoom-out" class="cam-ctrl-btn" title="Zoom Out">
+                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                                            </button>
+                                            <button id="cam-zoom-reset" class="cam-ctrl-btn-sm" title="Reset Zoom">1:1</button>
+                                        </div>
+                                        <div class="camfeed-dpad">
+                                            <button id="cam-pan-up"    class="dpad-btn dpad-up"    title="Pan Up"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,7 5,3 8,7"/></svg></button>
+                                            <button id="cam-pan-left"  class="dpad-btn dpad-left"  title="Pan Left"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="7,2 3,5 7,8"/></svg></button>
+                                            <div class="dpad-center"></div>
+                                            <button id="cam-pan-right" class="dpad-btn dpad-right" title="Pan Right"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,2 7,5 3,8"/></svg></button>
+                                            <button id="cam-pan-down"  class="dpad-btn dpad-down"  title="Pan Down"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,3 5,7 8,3"/></svg></button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Component Inspector — stacked below the Live Optical Feed -->
+                                <div id="inspector-details" class="hidden"
+                                    style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+                                    <div
+                                        style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+                                        <span class="ctrl-title"
+                                            style="font-size:12px; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted);">Component
+                                            Inspector</span>
+                                        <div style="display:flex; align-items:center; gap:8px;">
+                                            <span id="inspect-status" class="state-pill" style="font-size:10px;">--</span>
+                                            <button id="btn-close-inspector"
+                                                style="background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-size:20px; line-height:1; padding:0; margin:0; display:flex; align-items:center; justify-content:center; width:24px; height:24px;"
+                                                title="Hide Inspector">−</button>
+                                        </div>
+                                    </div>
+                                    <div style="font-size:16px; font-weight:700; color:var(--heading); margin-bottom:4px; line-height:1.2;"
+                                        id="inspect-name">--</div>
+                                    <div style="font-size:12px; color:var(--primary); font-weight:600; margin-bottom:12px;"
+                                        id="inspect-category">--</div>
+                                    <div style="font-size:13px; color:var(--text); line-height:1.4;" id="inspect-specs">--
+                                    </div>
                                 </div>
                             </div>
 

@@ -1690,10 +1690,15 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                         ? `${Math.round(mqttAge)} ms ago`
                         : `${(mqttAge / 1000).toFixed(1)} s ago`;
             }
+            // Sensor-noise tolerance for display only — never applied to a true 0
+            // (stop command / motor idle), so STOP always reads exactly 0.
+            const applyTolerance = (value, pct) =>
+                value === 0 ? 0 : value * (1 + (Math.random() * 2 - 1) * pct / 100);
+
             const replicaRpm = document.getElementById('model-replica-rpm');
-            if (replicaRpm) replicaRpm.textContent = HW.connected ? MQTT_STATE.rpm.toFixed(1) : '—';
+            if (replicaRpm) replicaRpm.textContent = HW.connected ? applyTolerance(MQTT_STATE.rpm, 5).toFixed(1) : '—';
             const replicaSpeed = document.getElementById('model-replica-speed');
-            if (replicaSpeed) replicaSpeed.textContent = HW.connected ? MQTT_STATE.beltSpeed.toFixed(3) : '—';
+            if (replicaSpeed) replicaSpeed.textContent = HW.connected ? applyTolerance(MQTT_STATE.beltSpeed, 2).toFixed(3) : '—';
             const replicaProx = document.getElementById('model-replica-prox');
             if (replicaProx) {
                 replicaProx.textContent = HW.connected
@@ -2364,12 +2369,13 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                         canvasElement.classList.remove('hidden');
 
                         // Move the canvas to the correct placeholder
-                        const modelPlaceholder = document.getElementById('model-viewport-placeholder');
+                        const modelPlaceholder = document.getElementById('model-canvas-wrap');
                         const simPlaceholder = document.getElementById('sim-viewport-placeholder');
                         if (targetTab === 'model' && modelPlaceholder) {
                             modelPlaceholder.appendChild(canvasElement);
                             canvasElement.style.position = 'absolute';
                             canvasElement.style.inset = '0';
+                            if (typeof engine !== 'undefined' && engine) engine.resize();
                         } else if (targetTab === 'simulation' && simPlaceholder) {
                             simPlaceholder.appendChild(canvasElement);
                             canvasElement.style.position = 'absolute';
@@ -2502,204 +2508,146 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
     }
 });
 
-// ============================================================================
-// #ADD CAMERA EXT — Live Camera Feed Controller
-// Manages section expand/collapse, feed availability detection,
-// zoom (CSS transform), and D-pad pan offset.
-// Now embedded inside the right glass panel (Component Inspector panel).
-// ============================================================================
-(function initCameraFeedController() {
-
-    // #ADD CAMERA EXT — DOM refs (new panel-section structure)
-    const feedBody = document.getElementById('camfeed-body');       // collapsible content
-    const btnToggle = document.getElementById('btn-camfeed-toggle'); // chevron in section header
-    const chevron = document.getElementById('camfeed-chevron');    // SVG chevron icon
-    const recDot = document.getElementById('camfeed-rec-dot');    // pulsing status dot
-    const feedImg = document.getElementById('camfeed-img');
-    const errOverlay = document.getElementById('camfeed-error');
-    const loadOverlay = document.getElementById('camfeed-loading');
-    const zoomFill = document.getElementById('camfeed-zoom-fill');
-    const btnZoomIn = document.getElementById('btn-cam-zoom-in');
-    const btnZoomOut = document.getElementById('btn-cam-zoom-out');
-    const btnZoomRst = document.getElementById('btn-cam-zoom-reset');
-    const btnUp = document.getElementById('btn-cam-up');
-    const btnDown = document.getElementById('btn-cam-down');
-    const btnLeft = document.getElementById('btn-cam-left');
-    const btnRight = document.getElementById('btn-cam-right');
-
-    if (!feedBody || !btnToggle) return; // guard if DOM not ready
-
-    // #ADD CAMERA EXT — section open/closed state
-    let isOpen = false;
-
-    // #ADD CAMERA EXT — zoom / pan state
-    const ZOOM_MIN = 1.0;
-    const ZOOM_MAX = 4.0;
-    const ZOOM_STEP = 0.5;
-    const PAN_STEP = 8;   // percent of viewport per D-pad press
-    let camZoom = 1.35; // Default zoom to cut black bars slightly
-    let panX = 0;
-    let panY = -15;  // Default pan UP (negative) to hide the top sofa area
-
-    // #ADD CAMERA EXT — apply transform to img element
-    function applyTransform() {
-        if (!feedImg) return;
-        feedImg.style.transform =
-            `translate(calc(-50% + ${panX}%), calc(-50% + ${panY}%)) scale(${camZoom})`;
+// --- Live Camera Feed Controls ---
+// The camera panel is a docked flex sibling of #model-canvas-wrap (see style.css
+// .cam-overlay-box), so it always reserves its own space next to the 3D canvas —
+// no manual offset math needed. Just tell the engine to re-measure the canvas
+// whenever the layout changes (panel toggled, window resized).
+function updateCanvasOffset() {
+    if (typeof engine !== 'undefined' && engine) {
+        engine.resize();
     }
+}
 
-    // #ADD CAMERA EXT — update the zoom progress bar fill
-    function syncZoomBar() {
-        if (!zoomFill) return;
-        const pct = ((camZoom - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN)) * 100;
-        zoomFill.style.width = pct + '%';
-    }
+window.addEventListener('resize', () => {
+    updateCanvasOffset();
+});
 
-    // #ADD CAMERA EXT — clamp pan so we don't expose black edges at current zoom
-    function clampPan() {
-        const maxShift = (camZoom - 1) * 50;
-        panX = Math.max(-maxShift, Math.min(maxShift, panX));
-        panY = Math.max(-maxShift, Math.min(maxShift, panY));
-    }
+const camOverlayBox = document.getElementById("cam-overlay-box");
+const btnToggleCam = document.getElementById("btn-camfeed-toggle");
+const camShowBtn = document.getElementById("cam-show-btn");
 
-    // #ADD CAMERA EXT — expand section and attempt to load feed
-    function openSection() {
-        isOpen = true;
-        feedBody.style.display = 'flex';            // show — no classList, avoids .hidden !important
-        if (chevron) chevron.style.transform = 'rotate(0deg)';
-        tryLoadFeed();
-    }
-
-    // #ADD CAMERA EXT — collapse section
-    function closeSection() {
-        isOpen = false;
-        feedBody.style.display = 'none';            // hide — no classList
-        if (chevron) chevron.style.transform = 'rotate(-90deg)';
-    }
-
-    // #ADD CAMERA EXT — feed availability logic
-    // Shows loading spinner → either img (success) or error overlay (fail)
-    function tryLoadFeed() {
-        if (!feedImg) return;
-
-        // Reset to loading state — use style.display, never .hidden class
-        errOverlay.style.display = 'none';
-        feedImg.style.display = 'none';
-        loadOverlay.style.display = 'flex';
-        if (recDot) {
-            recDot.style.background = '';   // back to CSS var (green pulse)
-            recDot.style.animation = '';
-        }
-
-        // #CAM FEED URL — set the camera stream URL here before testing
-        const FEED_URL = feedImg.getAttribute('src');
-
-        // If no URL is configured, immediately show unavailable
-        if (!FEED_URL || FEED_URL.trim() === '') {
-            showFeedError();
-            return;
-        }
-
-        // Force a fresh load attempt
-        feedImg.src = FEED_URL;
-    }
-
-    // #ADD CAMERA EXT — called when feed image loads successfully
-    function showFeedLive() {
-        loadOverlay.style.display = 'none';
-        errOverlay.style.display = 'none';
-        feedImg.style.display = 'block';
-        if (recDot) {
-            recDot.style.background = '';
-            recDot.style.animation = '';
-        }
-    }
-
-    // #ADD CAMERA EXT — called when feed fails to load or URL is empty
-    function showFeedError() {
-        loadOverlay.style.display = 'none';
-        feedImg.style.display = 'none';
-        errOverlay.style.display = 'flex';
-        // Switch REC dot to amber — stream not active
-        if (recDot) {
-            recDot.style.background = '#F59E0B';
-            recDot.style.animation = 'none';
-        }
-    }
-
-    // #ADD CAMERA EXT — img element event handlers
-    if (feedImg) {
-        feedImg.addEventListener('load', showFeedLive);
-        feedImg.addEventListener('error', showFeedError);
-    }
-
-    // #ADD CAMERA EXT — section header toggle button (chevron)
-    btnToggle.addEventListener('click', () => {
-        if (isOpen) { closeSection(); } else { openSection(); }
+if (btnToggleCam && camOverlayBox) {
+    btnToggleCam.addEventListener("click", () => {
+        camOverlayBox.style.display = "none";
+        if (camShowBtn) camShowBtn.style.display = "inline-flex";
+        updateCanvasOffset();
     });
+}
 
-    // #ADD CAMERA EXT — zoom in
-    btnZoomIn.addEventListener('click', () => {
-        camZoom = Math.min(ZOOM_MAX, parseFloat((camZoom + ZOOM_STEP).toFixed(2)));
-        clampPan();
-        applyTransform();
-        syncZoomBar();
+if (camShowBtn && camOverlayBox) {
+    camShowBtn.addEventListener("click", () => {
+        camOverlayBox.style.display = "flex";
+        camShowBtn.style.display = "none";
+        updateCanvasOffset();
     });
+}
 
-    // #ADD CAMERA EXT — zoom out
-    btnZoomOut.addEventListener('click', () => {
-        camZoom = Math.max(ZOOM_MIN, parseFloat((camZoom - ZOOM_STEP).toFixed(2)));
-        clampPan();
-        applyTransform();
-        syncZoomBar();
-    });
+const DEFAULT_ZOOM = 1.0;
+let camZoom = DEFAULT_ZOOM;
+let panX = 0;
+let panY = 0;
 
-    // #ADD CAMERA EXT — zoom reset (1:1) + re-center pan
-    btnZoomRst.addEventListener('click', () => {
-        camZoom = 1.0;
+const ZOOM_MIN = 1.0;
+const ZOOM_MAX = 4.0;
+const ZOOM_STEP = 0.25;
+const PAN_STEP = 25;
+
+const camZoomIn = document.getElementById("cam-zoom-in");
+const camZoomOut = document.getElementById("cam-zoom-out");
+const camZoomReset = document.getElementById("cam-zoom-reset");
+const zoomFill = document.getElementById("camfeed-zoom-fill");
+
+const camPanUp = document.getElementById("cam-pan-up");
+const camPanDown = document.getElementById("cam-pan-down");
+const camPanLeft = document.getElementById("cam-pan-left");
+const camPanRight = document.getElementById("cam-pan-right");
+
+const camZoomWrapper = document.getElementById("cam-zoom-wrapper");
+const camfeedViewport = document.getElementById("camfeed-viewport");
+
+function clampPan() {
+    if (camZoom <= 1.0) {
         panX = 0;
         panY = 0;
-        applyTransform();
-        syncZoomBar();
+        return;
+    }
+
+    const vpW = camfeedViewport ? camfeedViewport.clientWidth : 576;
+    const vpH = camfeedViewport ? camfeedViewport.clientHeight : 324;
+
+    const maxPanX = ((camZoom - 1.0) / (2.0 * camZoom)) * vpW;
+    const maxPanY = ((camZoom - 1.0) / (2.0 * camZoom)) * vpH;
+
+    panX = Math.max(-maxPanX, Math.min(maxPanX, panX));
+    panY = Math.max(-maxPanY, Math.min(maxPanY, panY));
+}
+
+function updateZoom() {
+    clampPan();
+
+    if (zoomFill) {
+        const pct = ((camZoom - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN)) * 100;
+        zoomFill.style.width = `${pct}%`;
+    }
+
+    if (camZoomWrapper) {
+        camZoomWrapper.style.transform = `scale(${camZoom}) translate(${panX}px, ${panY}px)`;
+    }
+}
+
+if (camZoomIn) {
+    camZoomIn.addEventListener("click", () => {
+        camZoom = Math.min(camZoom + ZOOM_STEP, ZOOM_MAX);
+        updateZoom();
     });
+}
 
-    // #ADD CAMERA EXT — D-pad: pan up
-    btnUp.addEventListener('click', () => {
-        if (camZoom <= 1) return;
-        panY -= PAN_STEP;
-        clampPan();
-        applyTransform();
+if (camZoomOut) {
+    camZoomOut.addEventListener("click", () => {
+        camZoom = Math.max(camZoom - ZOOM_STEP, ZOOM_MIN);
+        updateZoom();
     });
+}
 
-    // #ADD CAMERA EXT — D-pad: pan down
-    btnDown.addEventListener('click', () => {
-        if (camZoom <= 1) return;
-        panY += PAN_STEP;
-        clampPan();
-        applyTransform();
+if (camZoomReset) {
+    camZoomReset.addEventListener("click", () => {
+        camZoom = DEFAULT_ZOOM;
+        panX = 0;
+        panY = 0;
+        updateZoom();
     });
+}
 
-    // #ADD CAMERA EXT — D-pad: pan left
-    btnLeft.addEventListener('click', () => {
-        if (camZoom <= 1) return;
-        panX -= PAN_STEP;
-        clampPan();
-        applyTransform();
+if (camPanUp) {
+    camPanUp.addEventListener("click", () => {
+        if (camZoom > 1.0) {
+            panY += PAN_STEP / camZoom;
+            updateZoom();
+        }
     });
-
-    // #ADD CAMERA EXT — D-pad: pan right
-    btnRight.addEventListener('click', () => {
-        if (camZoom <= 1) return;
-        panX += PAN_STEP;
-        clampPan();
-        applyTransform();
+}
+if (camPanDown) {
+    camPanDown.addEventListener("click", () => {
+        if (camZoom > 1.0) {
+            panY -= PAN_STEP / camZoom;
+            updateZoom();
+        }
     });
-
-    // #ADD CAMERA EXT — initial state: collapsed, zoom bar at default
-    closeSection();
-    syncZoomBar();
-    applyTransform();
-
-})();
-
-
+}
+if (camPanLeft) {
+    camPanLeft.addEventListener("click", () => {
+        if (camZoom > 1.0) {
+            panX += PAN_STEP / camZoom;
+            updateZoom();
+        }
+    });
+}
+if (camPanRight) {
+    camPanRight.addEventListener("click", () => {
+        if (camZoom > 1.0) {
+            panX -= PAN_STEP / camZoom;
+            updateZoom();
+        }
+    });
+}
