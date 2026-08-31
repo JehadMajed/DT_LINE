@@ -206,7 +206,7 @@ const MQTT_CFG = {
     clientId: 'dt_twin_' + Math.random().toString(16).slice(2, 8),
     get activeProfile() {
         const sel = document.getElementById('select-broker-profile');
-        return BROKER_PROFILES[(sel && sel.value) || 'cloudflare'];
+        return BROKER_PROFILES[(sel && sel.value) || 'hivemq'];
     },
     get brokerUrl() {
         return this.activeProfile.brokerUrl;
