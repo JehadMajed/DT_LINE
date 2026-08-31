@@ -2117,6 +2117,74 @@ model-viewer {
 .fault-btn.info:hover {
   background: #ccfbf1;
 }
+/* Loading Screen — full-viewport splash shown until the GLB asset finishes
+   loading, so the dashboard never renders behind an unstyled loading box. */
+#loading-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--heading);
+}
+
+.loader-content {
+  text-align: center;
+  max-width: 360px;
+  padding: 0 24px;
+}
+
+.loader-eyebrow {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.loader-title {
+  margin: 0 0 20px;
+  font-size: 26px;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+.loader-bar {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+  margin: 0 0 16px;
+}
+
+.loader-bar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -40%;
+  width: 40%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+  animation: loader-bar-sweep 1.1s ease-in-out infinite;
+}
+
+@keyframes loader-bar-sweep {
+  0% { left: -40%; }
+  100% { left: 100%; }
+}
+
+.loader-path {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  font-family: 'SFMono-Regular', Consolas, monospace;
+}
+
 /* Babylon Canvas */
 #canvas3d { width: 100%; height: 100%; outline: none; background: transparent; }
 #canvas3d.hidden { display: none !important; }

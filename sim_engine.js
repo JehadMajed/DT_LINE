@@ -8,6 +8,7 @@ const simEngine = {
     timeScale: 1.0,
     t_sim: 0,         // simulated seconds
     lastTick: 0,
+    lastGaugeUpdate: 0, // real-time ms, throttles gauge text refresh
     intervalId: null,
 
     // State
@@ -54,10 +55,6 @@ const simUI = {
     // Log
     logBody: document.getElementById('sim-log'),
     btnClearLog: document.getElementById('sim-log-clear-btn'),
-    
-    // Inputs
-    inputRpm: document.getElementById('sim-input-rpm'),
-    btnSetRpm: document.getElementById('btn-set-rpm'),
     
     // Charts
     ctxRpm: document.getElementById('chart-rpm'),
@@ -338,7 +335,13 @@ function engineStep() {
     }
 
     physicsTick(dt_sim);
-    updateGauges();
+
+    // Gauge text is throttled to ~10 Hz real-time so digits stay readable
+    // even at high time-scale multipliers (physics itself still ticks every frame).
+    if (now - simEngine.lastGaugeUpdate >= 100) {
+        simEngine.lastGaugeUpdate = now;
+        updateGauges();
+    }
 
     // Chart update is expensive, limit to ~10 Hz (in sim time)
     if (Math.floor(simEngine.t_sim * 10) % Math.max(1, Math.floor(10 / simEngine.timeScale)) === 0) {
@@ -428,17 +431,6 @@ function initSimEngine() {
                 simUI.slider.value = step;
                 simUI.slider.dispatchEvent(new Event('input'));
             });
-        });
-    }
-
-    // Manual Set Target
-    if (simUI.btnSetRpm) {
-        simUI.btnSetRpm.addEventListener('click', () => {
-            const val = parseInt(simUI.inputRpm.value);
-            if (!isNaN(val)) {
-                simEngine.targetRpm = val;
-                simLog('info', `Manual override: Target RPM set to ${val}`);
-            }
         });
     }
 

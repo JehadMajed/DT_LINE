@@ -42,12 +42,10 @@ const UI = {
     carbon: document.getElementById('tele-carbon'),
 
     // Simulation Tab Controls
-    simRpm: document.getElementById('sim-input-rpm'),
     simVolt: document.getElementById('sim-input-volt'),
     simLoad: document.getElementById('sim-input-load'),
     btnSimRun: document.getElementById('btn-sim-run'),
     btnSimStop: document.getElementById('btn-sim-stop'),
-    btnSimSetRpm: document.getElementById('btn-sim-set-rpm'),
     btnSimSetVolt: document.getElementById('btn-sim-set-volt'),
     btnSimSetLoad: document.getElementById('btn-sim-set-load'),
 
@@ -60,12 +58,6 @@ const UI = {
     inspectSpecs: document.getElementById('inspect-specs'),
     inspectStatus: document.getElementById('inspect-status'),
     btnFocusPart: document.getElementById('btn-focus-part'),
-
-    // Fault Simulator
-    btnFaultMotor: document.getElementById('btn-fault-motor'),
-    btnFaultScrew: document.getElementById('btn-fault-screw'),
-    btnFaultBelt: document.getElementById('btn-fault-belt'),
-    btnFaultReset: document.getElementById('btn-fault-reset'),
 
     // AI Predictive
     aiRul: document.getElementById('ai-rul'),
@@ -554,8 +546,8 @@ function updateHwBadge(connected) {
 // Enables/disables controls and shows/hides overlay based on state.
 function updateSimControlsState() {
     // Simulation controls: disabled when real hardware is active
-    const simControls = [UI.simRpm, UI.simVolt, UI.simLoad,
-    UI.btnSimRun, UI.btnSimStop, UI.btnSimSetRpm,
+    const simControls = [UI.simVolt, UI.simLoad,
+    UI.btnSimRun, UI.btnSimStop,
     UI.btnSimSetVolt, UI.btnSimSetLoad];
     simControls.forEach(el => { if (el) el.disabled = HW.connected; });
 
@@ -1582,6 +1574,10 @@ function drawPowerSparkline(data) {
 createScene().then(({ scene, kinematics, animationGroups }) => {
     const camera = scene.activeCamera;
 
+    // Live Replica Status HUD (RPM / Speed) refresh throttle — see usage below.
+    const REPLICA_HUD_REFRESH_MS = 3000;
+    let lastReplicaHudUpdate = 0;
+
     // Start render loop
     engine.runRenderLoop(() => {
         scene.render();
@@ -1692,13 +1688,19 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
             }
             // Sensor-noise tolerance for display only — never applied to a true 0
             // (stop command / motor idle), so STOP always reads exactly 0.
+            // Refreshed only every 3s (see REPLICA_HUD_REFRESH_MS below) so the
+            // readout doesn't flicker every render frame.
             const applyTolerance = (value, pct) =>
                 value === 0 ? 0 : value * (1 + (Math.random() * 2 - 1) * pct / 100);
 
-            const replicaRpm = document.getElementById('model-replica-rpm');
-            if (replicaRpm) replicaRpm.textContent = HW.connected ? applyTolerance(MQTT_STATE.rpm, 5).toFixed(1) : '—';
-            const replicaSpeed = document.getElementById('model-replica-speed');
-            if (replicaSpeed) replicaSpeed.textContent = HW.connected ? applyTolerance(MQTT_STATE.beltSpeed, 2).toFixed(3) : '—';
+            const now = Date.now();
+            if (now - lastReplicaHudUpdate >= REPLICA_HUD_REFRESH_MS) {
+                lastReplicaHudUpdate = now;
+                const replicaRpm = document.getElementById('model-replica-rpm');
+                if (replicaRpm) replicaRpm.textContent = HW.connected ? applyTolerance(MQTT_STATE.rpm, 5).toFixed(1) : '—';
+                const replicaSpeed = document.getElementById('model-replica-speed');
+                if (replicaSpeed) replicaSpeed.textContent = HW.connected ? applyTolerance(MQTT_STATE.beltSpeed, 2).toFixed(3) : '—';
+            }
             const replicaProx = document.getElementById('model-replica-prox');
             if (replicaProx) {
                 replicaProx.textContent = HW.connected
@@ -1771,7 +1773,10 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
             // ── Tab 3 Simulation belt animation — FULLY INDEPENDENT from Tab 2 ──
             // Source: simEngine.rpm (sim_engine.js isolated physics object).
             // Independent of hardware connection status.
-            if (typeof simEngine !== 'undefined') {
+            // Gated on isRunning: when paused, simEngine.rpm holds its last
+            // nonzero value (physics tick stopped, not zeroed), so without this
+            // check the belt would keep spinning forever at that frozen rate.
+            if (typeof simEngine !== 'undefined' && simEngine.isRunning) {
                 active3dRpm = simEngine.rpm;
             } else {
                 active3dRpm = 0;
@@ -1948,69 +1953,10 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
         });
     }
 
-    // -------------------------------------------------------------------------
-    // FAULT SIMULATORS
-    // -------------------------------------------------------------------------
-    if (UI.btnFaultMotor) {
-        UI.btnFaultMotor.addEventListener('click', () => {
-            SIM.faults.motorOverheat = !SIM.faults.motorOverheat;
-            if (SIM.faults.motorOverheat) {
-                UI.btnFaultMotor.classList.add('active-fault-motor');
-                addLog('CRITICAL: Motor thermal overload detected — temperature spiking.', 'error');
-            } else {
-                UI.btnFaultMotor.classList.remove('active-fault-motor');
-                SIM.motorTemp = 24.3;
-                const motorBody = scene.getMeshByName('MTR_02_Body');
-                if (motorBody && motorBody.material) {
-                    motorBody.material.emissiveColor = new BABYLON.Color3(0, 0, 0);
-                }
-                addLog('NOMINAL: Motor thermal fault cleared — temperature stable.', 'success');
-            }
-            if (SIM.selectedMesh) updateInspector(SIM.selectedMesh);
-        });
-    }
-
-    if (UI.btnFaultScrew) {
-        UI.btnFaultScrew.addEventListener('click', () => {
-            SIM.faults.looseScrew = !SIM.faults.looseScrew;
-            if (SIM.faults.looseScrew) {
-                UI.btnFaultScrew.classList.add('active-fault-screw');
-                addLog('WARNING: High micro-vibration on Leg A1 fastener.', 'warning');
-            } else {
-                UI.btnFaultScrew.classList.remove('active-fault-screw');
-                const looseScrew = scene.getMeshByName('Left_A_Leg_Rect_Screw_1.001');
-                if (looseScrew) {
-                    if (looseScrew._origPos) looseScrew.position = looseScrew._origPos.clone();
-                    looseScrew.renderOutline = false;
-                }
-                addLog('NOMINAL: Fastener secured — mechanical vibration resolved.', 'success');
-            }
-            if (SIM.selectedMesh) updateInspector(SIM.selectedMesh);
-        });
-    }
-
-    if (UI.btnFaultBelt) {
-        UI.btnFaultBelt.addEventListener('click', () => {
-            SIM.faults.beltOverload = !SIM.faults.beltOverload;
-            if (SIM.faults.beltOverload) {
-                UI.btnFaultBelt.classList.add('active-fault-belt');
-                addLog('WARNING: Belt mechanical overload — slippage active.', 'warning');
-            } else {
-                UI.btnFaultBelt.classList.remove('active-fault-belt');
-                addLog('NOMINAL: Belt load friction normalised.', 'success');
-            }
-            if (SIM.selectedMesh) updateInspector(SIM.selectedMesh);
-        });
-    }
-
-    if (UI.btnFaultReset) {
-        UI.btnFaultReset.addEventListener('click', () => {
-            if (SIM.faults.motorOverheat) UI.btnFaultMotor.click();
-            if (SIM.faults.looseScrew) UI.btnFaultScrew.click();
-            if (SIM.faults.beltOverload) UI.btnFaultBelt.click();
-            addLog('All diagnostics reset — systems nominal.', 'success');
-        });
-    }
+    // NOTE: btn-fault-motor/screw/belt/reset live exclusively in the Simulation
+    // tab (Tab 3) and are owned entirely by sim_engine.js (simEngine.faults).
+    // app.js must never bind to them — doing so previously leaked fault state
+    // into this file's legacy SIM.faults (Tab 2), breaking tab isolation.
 
     // ---------------------------------
     function generateTelemetry() {
