@@ -80,6 +80,11 @@
                     <h2 class="sec-heading">Executive Overview</h2>
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
+                    <select id="select-broker-profile" class="cmd-btn" style="width:auto;padding:0 12px;">
+                        <option value="cloudflare">Cloudflare Tunnel</option>
+                        <option value="hivemq">HiveMQ Cloud</option>
+                        <option value="emqx">EMQX Cloud</option>
+                    </select>
                     <button id="btn-mqtt-connect" class="cmd-btn" style="width:auto;padding:0 20px;">Connect Live
                         Hardware</button>
                     <span id="status-pill" class="live-pill" style="display:none;">LIVE</span>

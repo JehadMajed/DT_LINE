@@ -172,11 +172,45 @@ const optState = {
 // Adjust brokerUrl if your Mosquitto WebSocket port differs from 9001.
 // ── MQTT Configuration ─────────────────────────────────────────────────────
 // Adjust brokerUrl if your Mosquitto WebSocket port differs from 9001.
+// Three interchangeable streaming plans. The bridge (serial_mqtt_bridge.py) publishes
+// telemetry to whichever of these are enabled on the Pi side; pick the matching one here
+// with the "select-broker-profile" dropdown in the Overview tab.
+const BROKER_PROFILES = {
+    // Plan A: own Mosquitto broker on the Pi, exposed publicly via `cloudflared tunnel`.
+    // Update this URL every time a Quick Tunnel restarts (or switch to a Named Tunnel
+    // with a stable hostname once you have a domain in Cloudflare).
+    cloudflare: {
+        label: 'Cloudflare Tunnel',
+        brokerUrl: 'wss://gaming-destination-where-transmission.trycloudflare.com',
+        options: {},
+    },
+    // Plan B: HiveMQ Cloud free-tier cluster. Fill in your cluster's WSS URL + credentials
+    // from the HiveMQ Cloud console (Free Tier -> Cluster -> "Access Management").
+    hivemq: {
+        label: 'HiveMQ Cloud',
+        brokerUrl: 'wss://dcec0602f95f444bb3fe2bcdfd5efc38.s1.eu.hivemq.cloud:8884/mqtt',
+        options: { username: 'Lamps', password: 'Aa448866' },
+    },
+    // Plan C: EMQX Cloud Serverless free-tier deployment. Fill in from the EMQX Cloud
+    // console (Deployment -> Overview -> WebSocket connection details).
+    emqx: {
+        label: 'EMQX Cloud',
+        brokerUrl: 'wss://xb6e165f.ala.asia-southeast1.emqxsl.com:8084/mqtt',
+        options: { username: 'Lamps', password: 'Aa448866' },
+    },
+};
+
 const MQTT_CFG = {
-    brokerUrl: 'ws://192.168.1.102:9001',        // Changed from localhost to local network IP
     topicSub: 'digital_twin/motor/telemetry', // ESP32 -> app
     topicCmd: 'digital_twin/motor/command',   // app -> ESP32
     clientId: 'dt_twin_' + Math.random().toString(16).slice(2, 8),
+    get activeProfile() {
+        const sel = document.getElementById('select-broker-profile');
+        return BROKER_PROFILES[(sel && sel.value) || 'cloudflare'];
+    },
+    get brokerUrl() {
+        return this.activeProfile.brokerUrl;
+    },
 };
 
 // ============================================================================
@@ -937,13 +971,15 @@ function connectMQTT() {
     }
     if (HW.client) { disconnectMQTT(); return; }
 
-    addLog(`Connecting to MQTT broker: ${MQTT_CFG.brokerUrl} …`, 'info');
+    const profile = MQTT_CFG.activeProfile;
+    addLog(`Connecting to MQTT broker [${profile.label}]: ${profile.brokerUrl} …`, 'info');
 
-    const client = mqtt.connect(MQTT_CFG.brokerUrl, {
+    const client = mqtt.connect(profile.brokerUrl, {
         clientId: MQTT_CFG.clientId,
         keepalive: 30,
         reconnectPeriod: 0,
         connectTimeout: 5000,
+        ...profile.options,
     });
 
     HW.client = client;
