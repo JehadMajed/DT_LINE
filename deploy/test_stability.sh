@@ -8,12 +8,13 @@ ok()   { echo "  PASS: $*"; PASS=$((PASS+1)); }
 bad()  { echo "  FAIL: $*"; FAIL=$((FAIL+1)); }
 
 echo "[1] Units enabled for boot?"
-systemctl is-enabled --quiet dt-bridge && ok "dt-bridge enabled"  || bad "dt-bridge NOT enabled"
-systemctl is-enabled --quiet dt-camera && ok "dt-camera enabled"  || bad "dt-camera NOT enabled"
+for U in dt-bridge go2rtc tailscale-funnel; do
+    systemctl is-enabled --quiet "$U" && ok "$U enabled" || bad "$U NOT enabled"
+done
 
 echo "[2] Units running now?"
 systemctl is-active --quiet dt-bridge && ok "dt-bridge active" || bad "dt-bridge not active"
-systemctl is-active --quiet dt-camera && ok "dt-camera active" || bad "dt-camera not active"
+systemctl is-active --quiet go2rtc   && ok "go2rtc active"   || bad "go2rtc not active"
 
 echo "[3] Telemetry flowing? (watch journal 15s)"
 if timeout 15 journalctl -u dt-bridge -f --no-pager | grep -m1 -q "ESP32 -> MQTT"; then

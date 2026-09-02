@@ -27,7 +27,7 @@ if systemctl is-active --quiet dt-bridge; then
 fi
 
 # 3) Camera: go2rtc up and pi_cam has a producer?
-if systemctl list-unit-files | grep -q '^go2rtc'; then
+if systemctl cat go2rtc.service >/dev/null 2>&1; then
     if ! systemctl is-active --quiet go2rtc; then
         LOG "go2rtc not active -> restart"
         sudo systemctl restart go2rtc

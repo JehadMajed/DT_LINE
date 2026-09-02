@@ -31,8 +31,9 @@ sudo systemctl daemon-reload
 # 4) Camera: this repo does NOT manage the camera. The Pi already has
 #    go2rtc.service + tailscale-funnel.service. Just make sure they're enabled.
 for SVC in go2rtc.service tailscale-funnel.service; do
-    if systemctl list-unit-files | grep -q "^${SVC}"; then
-        sudo systemctl enable "$SVC" || true
+    if systemctl cat "$SVC" >/dev/null 2>&1; then
+        sudo systemctl enable "$SVC" >/dev/null 2>&1 || true
+        echo "$SVC: enabled for boot"
     else
         echo "WARNING: $SVC not found — camera autostart is NOT guaranteed."
     fi
