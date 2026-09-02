@@ -40,7 +40,7 @@ done
 
 # 5) Passwordless restart for the watchdog
 SUDOERS=/etc/sudoers.d/dt-watchdog
-echo "$USER_NAME ALL=(root) NOPASSWD: /bin/systemctl restart dt-bridge, /bin/systemctl restart go2rtc" | sudo tee "$SUDOERS" >/dev/null
+echo "$USER_NAME ALL=(root) NOPASSWD: /bin/systemctl restart dt-bridge, /bin/systemctl restart go2rtc, /usr/bin/tailscale serve reset, /usr/bin/tailscale funnel *" | sudo tee "$SUDOERS" >/dev/null
 sudo chmod 440 "$SUDOERS"
 
 # 6) Enable + (re)start the bridge

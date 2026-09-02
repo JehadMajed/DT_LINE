@@ -39,3 +39,13 @@ if systemctl list-unit-files | grep -q '^go2rtc'; then
         fi
     fi
 fi
+
+# 4) Tailscale Funnel: is the public URL actually reachable and mapped to :1984?
+#    (the oneshot funnel unit can fail at boot if tailscaled isn't online yet)
+if command -v tailscale >/dev/null; then
+    if ! tailscale serve status 2>/dev/null | grep -q '127.0.0.1:1984'; then
+        LOG "funnel mapping missing -> re-applying"
+        sudo tailscale serve reset 2>/dev/null || true
+        sudo tailscale funnel --bg --https=443 http://127.0.0.1:1984 || true
+    fi
+fi
