@@ -3,6 +3,33 @@ import json
 import paho.mqtt.client as mqtt
 import time
 import threading
+import os
+import signal
+import sys
+
+# Fail fast if a second copy of this script is already running (it would fight
+# for the serial port and silently break commands). Uses a pid lock file.
+_LOCK = "/tmp/serial_mqtt_bridge.lock"
+if os.path.exists(_LOCK):
+    try:
+        with open(_LOCK) as f:
+            other = int(f.read().strip())
+        os.kill(other, 0)          # raises if pid is dead
+        print(f"Another bridge is already running (pid {other}). Exiting.")
+        sys.exit(1)
+    except (ProcessLookupError, ValueError):
+        pass                       # stale lock, take over
+with open(_LOCK, "w") as f:
+    f.write(str(os.getpid()))
+
+_stop = threading.Event()
+
+def _shutdown(signum, frame):
+    print(f"Signal {signum} received — shutting down.")
+    _stop.set()
+
+signal.signal(signal.SIGTERM, _shutdown)
+signal.signal(signal.SIGINT, _shutdown)
 
 # Configuration - CHANGE THESE AS NEEDED
 SERIAL_PORT = '/dev/ttyUSB0'  # Usually /dev/ttyUSB0 or /dev/ttyACM0 on Raspberry Pi
@@ -61,7 +88,7 @@ _ser_lock = threading.Lock()
 def open_serial():
     """(Re)open the ESP32 serial port. Blocks until it succeeds."""
     global ser
-    while True:
+    while not _stop.is_set():
         try:
             with _ser_lock:
                 if ser is not None:
@@ -75,7 +102,7 @@ def open_serial():
         except Exception as e:
             print(f"Serial open failed ({e}); retrying in 3s. "
                   f"Check `dmesg | grep tty` / that no other process holds {SERIAL_PORT}.")
-            time.sleep(3)
+            _stop.wait(3)
 
 def try_reopen_serial_once():
     """Single non-blocking reopen attempt (safe to call from paho threads)."""
@@ -170,14 +197,21 @@ def publish_all(topic, payload):
 
 # Main loop: Read from Serial and publish to all connected brokers
 print(f"Listening for telemetry... Active plans: {list(clients.keys())}. Press Ctrl+C to exit.")
+_read_errors = 0
 try:
-    while True:
+    while not _stop.is_set():
         try:
             with _ser_lock:
                 waiting = ser.in_waiting if ser is not None else 0
                 line = ser.readline().decode('utf-8', errors='ignore').strip() if waiting > 0 else None
+            _read_errors = 0
         except Exception as e:
-            print(f"Serial read error ({e}); reconnecting…")
+            _read_errors += 1
+            # Back off so a flaky port doesn't turn into a reopen storm.
+            backoff = min(_read_errors, 5)
+            if _read_errors <= 3 or _read_errors % 10 == 0:
+                print(f"Serial read error #{_read_errors} ({e}); reopen in {backoff}s…")
+            _stop.wait(backoff)
             open_serial()
             continue
         if line:
@@ -220,12 +254,25 @@ try:
             # Print debug lines so you can still see ESP32 console output
             elif line:
                 print(f"[ESP32] {line}")
-        time.sleep(0.001)
+        _stop.wait(0.001)
 
 except KeyboardInterrupt:
     print("\nExiting...")
 finally:
-    ser.close()
+    try:
+        if ser is not None:
+            ser.close()
+    except Exception:
+        pass
     for client in clients.values():
-        client.loop_stop()
-        client.disconnect()
+        try:
+            client.loop_stop()
+            client.disconnect()
+        except Exception:
+            pass
+    try:
+        if open(_LOCK).read().strip() == str(os.getpid()):
+            os.remove(_LOCK)
+    except Exception:
+        pass
+    print("Shutdown complete.")
