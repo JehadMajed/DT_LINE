@@ -1973,79 +1973,79 @@ model-viewer {
   }
 }
 
-   / *   - - -   F a u l t   I n j e c t i o n   &   C o s t   - - -   * /   . f a u l t - i n j - c a r d    {
-         m a r g i n - t o p :    1 6 p x ;
-         b a c k g r o u n d :    v a r ( - - s u r f a c e ) ;
-         b o r d e r :    1 p x   s o l i d   v a r ( - - b o r d e r ) ;
-         b o r d e r - r a d i u s :    8 p x ;
-         p a d d i n g :    1 2 p x ;
-     
+ /* --- Fault Injection & Cost --- */ .fault-inj-card  {
+     margin-top:  16px;
+     background:  var(--surface);
+     border:  1px solid var(--border);
+     border-radius:  8px;
+     padding:  12px;
+   
 }
 
-   . f a u l t - i n j - t i t l e    {
-         f o n t - s i z e :    1 1 p x ;
-         f o n t - w e i g h t :    7 0 0 ;
-         c o l o r :    v a r ( - - t e x t - m u t e d ) ;
-         t e x t - t r a n s f o r m :    u p p e r c a s e ;
-         l e t t e r - s p a c i n g :    0 . 0 5 e m ;
-         m a r g i n - b o t t o m :    8 p x ;
-     
+ .fault-inj-title  {
+     font-size:  11px;
+     font-weight:  700;
+     color:  var(--text-muted);
+     text-transform:  uppercase;
+     letter-spacing:  0.05em;
+     margin-bottom:  8px;
+   
 }
 
-   . f a u l t - i n j - g r i d    {
-         d i s p l a y :    f l e x ;
-         f l e x - d i r e c t i o n :    c o l u m n ;
-         g a p :    6 p x ;
-     
+ .fault-inj-grid  {
+     display:  flex;
+     flex-direction:  column;
+     gap:  6px;
+   
 }
 
-   . f a u l t - b t n    {
-         f o n t - f a m i l y :    ' I n t e r '  ,    s a n s - s e r i f ;
-         f o n t - s i z e :    1 2 p x ;
-         f o n t - w e i g h t :    6 0 0 ;
-         p a d d i n g :    8 p x   1 2 p x ;
-         b o r d e r - r a d i u s :    6 p x ;
-         b o r d e r :    1 p x   s o l i d   v a r ( - - b o r d e r ) ;
-         c u r s o r :    p o i n t e r ;
-         b a c k g r o u n d :    v a r ( - - s u r f a c e ) ;
-         c o l o r :    v a r ( - - t e x t ) ;
-         t r a n s i t i o n :    a l l   0 . 2 s ;
-         t e x t - a l i g n :    l e f t ;
-     
+ .fault-btn  {
+     font-family:  'Inter' ,  sans-serif;
+     font-size:  12px;
+     font-weight:  600;
+     padding:  8px 12px;
+     border-radius:  6px;
+     border:  1px solid var(--border);
+     cursor:  pointer;
+     background:  var(--surface);
+     color:  var(--text);
+     transition:  all 0.2s;
+     text-align:  left;
+   
 }
 
-   . f a u l t - b t n : h o v e r    {
-         f i l t e r :    b r i g h t n e s s ( 0 . 9 ) ;
-     
+ .fault-btn:hover  {
+     filter:  brightness(0.9);
+   
 }
 
-   . f a u l t - b t n : a c t i v e    {
-         t r a n s f o r m :    s c a l e ( 0 . 9 8 ) ;
-     
+ .fault-btn:active  {
+     transform:  scale(0.98);
+   
 }
 
-   . f a u l t - b t n . w a r n : h o v e r    {
-         b a c k g r o u n d :    v a r ( - - w a r n i n g - s o f t ) ;
-         c o l o r :    v a r ( - - w a r n i n g ) ;
-         b o r d e r - c o l o r :    v a r ( - - w a r n i n g ) ;
-     
+ .fault-btn.warn:hover  {
+     background:  var(--warning-soft);
+     color:  var(--warning);
+     border-color:  var(--warning);
+   
 }
 
-   . f a u l t - b t n . b a d : h o v e r    {
-         b a c k g r o u n d :    v a r ( - - d a n g e r - s o f t ) ;
-         c o l o r :    v a r ( - - d a n g e r ) ;
-         b o r d e r - c o l o r :    v a r ( - - d a n g e r ) ;
-     
+ .fault-btn.bad:hover  {
+     background:  var(--danger-soft);
+     color:  var(--danger);
+     border-color:  var(--danger);
+   
 }
 
-   . f a u l t - b t n . i n f o : h o v e r    {
-         b a c k g r o u n d :    v a r ( - - p r i m a r y - s o f t ) ;
-         c o l o r :    v a r ( - - p r i m a r y ) ;
-         b o r d e r - c o l o r :    v a r ( - - p r i m a r y ) ;
-     
+ .fault-btn.info:hover  {
+     background:  var(--primary-soft);
+     color:  var(--primary);
+     border-color:  var(--primary);
+   
 }
 
-       
+   
 
 /* Fault Injection Card */
 .fault-inj-card {
@@ -2409,3 +2409,4 @@ model-viewer {
   background: var(--border-strong);
   border-radius: 50%;
 }
+
