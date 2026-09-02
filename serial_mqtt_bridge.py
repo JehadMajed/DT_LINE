@@ -6,6 +6,7 @@ import threading
 import os
 import signal
 import sys
+import hmac
 
 # Fail fast if a second copy of this script is already running (it would fight
 # for the serial port and silently break commands). Uses a pid lock file.
@@ -37,6 +38,23 @@ BAUD_RATE = 115200
 TOPIC_TELEMETRY = 'digital_twin/motor/telemetry'
 TOPIC_ENCODER = 'digital_twin/encoder/telemetry'
 TOPIC_COMMAND = 'digital_twin/motor/command'
+TOPIC_EVENT = 'digital_twin/motor/event'
+
+# ── Breaker-OFF authorization ────────────────────────────────────────────────
+# Opening the NB2 breaker cuts AC mains to the whole station. The dashboard must
+# include a passphrase ({"breaker":"off","key":"..."}) that matches this secret,
+# checked HERE (server side) before the command is forwarded to the ESP32.
+# The secret lives only in ~/DT_LINE/.dt_secret (git-ignored) — never in the repo
+# or the deployed dashboard. Any command with breaker:"off" and no/wrong key is
+# dropped and logged.
+_SECRET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.dt_secret')
+try:
+    with open(_SECRET_PATH) as _f:
+        BREAKER_SECRET = _f.read().strip()
+    print(f"Breaker-OFF passphrase loaded from {_SECRET_PATH}")
+except OSError:
+    BREAKER_SECRET = ''
+    print(f"WARNING: no {_SECRET_PATH} — ALL remote 'breaker: off' commands will be REJECTED.")
 
 # ── Streaming Plans ──────────────────────────────────────────────────────────
 # Telemetry is published to every broker with enabled=True below, so the
@@ -140,6 +158,28 @@ def on_disconnect(client, userdata, rc):
 def on_message(client, userdata, msg):
     global ser
     command_json = msg.payload.decode('utf-8', errors='ignore').strip()
+
+    # Gate the one destructive command: breaker OFF must carry the passphrase.
+    if command_json.startswith('{'):
+        try:
+            obj = json.loads(command_json)
+        except ValueError:
+            obj = None
+        if isinstance(obj, dict) and obj.get('breaker') == 'off':
+            supplied = obj.get('key', '')
+            if not BREAKER_SECRET or not hmac.compare_digest(str(supplied), BREAKER_SECRET):
+                print(f"[AUTH] REJECTED breaker OFF from {userdata} (bad/missing key)")
+                try:
+                    for c in clients.values():
+                        c.publish(TOPIC_EVENT, json.dumps({
+                            'ts': time.time(), 'kind': 'breaker_off_rejected', 'broker': userdata}))
+                except Exception:
+                    pass
+                return
+            obj.pop('key', None)
+            command_json = json.dumps(obj)   # forward without the passphrase
+            print(f"[AUTH] breaker OFF authorized from {userdata}")
+
     print(f"[MQTT:{userdata} -> ESP32] Sending: {command_json}")
     for attempt in range(2):
         try:

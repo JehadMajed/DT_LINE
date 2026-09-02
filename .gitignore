@@ -1,0 +1,10 @@
+# Secrets — never commit
+.dt_secret
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor / OS
+.DS_Store
+Thumbs.db

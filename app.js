@@ -1027,6 +1027,13 @@ function connectMQTT() {
     client.on('message', (topic, payload) => {
         if (topic === MQTT_CFG.topicSub || topic === 'digital_twin/motor/telemetry') {
             parseTelemetry(payload.toString());
+        } else if (topic === 'digital_twin/motor/event') {
+            try {
+                const ev = JSON.parse(payload.toString());
+                if (ev.kind === 'breaker_off_rejected') {
+                    addLog('[NB2] ⛔ Breaker OFF REJECTED by bridge — wrong or missing passphrase.', 'error');
+                }
+            } catch (e) { /* ignore malformed event */ }
         }
     });
 
@@ -1095,7 +1102,31 @@ if (btnMqttModel) {
     });
 }
 
-// ── NB2 Breaker Control Buttons ───────────────────────────────────────────────
+// ── NB2 Breaker Control ───────────────────────────────────────────────────────
+// SINGLE choke point for opening the breaker. Every path (panel OFF button,
+// HARD POWER CUT) goes through breakerOff(), which is the only place that
+// publishes {breaker:'off'} — and the only place the passphrase gate lives.
+// The passphrase is typed by the operator, never stored in this file; the
+// bridge verifies it against ~/DT_LINE/.dt_secret before forwarding to the ESP32.
+function breakerOn() {
+    if (!HW.connected) { addLog('[NB2] Not connected — breaker ON NOT sent.', 'warning'); return; }
+    sendCmdObject({ breaker: 'on' });
+    addLog('[NB2] Remote CLOSE (breaker ON) command sent.', 'info');
+}
+
+async function breakerOff({ estopFirst = false, label = 'panel' } = {}) {
+    if (!HW.connected) { addLog('[NB2] Not connected — breaker OFF NOT sent.', 'warning'); return; }
+    if (!confirm('⚠️ BREAKER OFF\n\nOpening the breaker cuts AC power to the ENTIRE station — motor, sensors and all field equipment de-energise immediately.\n\nProceed only if the line is stopped and it is safe to do so.')) return;
+    const key = window.prompt('Enter the breaker passphrase to confirm power cut:');
+    if (!key) { addLog('[NB2] Breaker OFF cancelled — no passphrase.', 'info'); return; }
+    if (estopFirst) {
+        sendCmdObject({ cmd: 'estop' });
+        await new Promise(r => setTimeout(r, 200));
+    }
+    sendCmdObject({ breaker: 'off', key });
+    addLog(`[NB2] ⚠️ Breaker OFF sent (${label}) — awaiting bridge authorization.`, 'warning');
+}
+
 const btnNb2UnlockModel = document.getElementById('btn-nb2-unlock-model');
 if (btnNb2UnlockModel) {
     btnNb2UnlockModel.addEventListener('click', () => {
@@ -1104,52 +1135,17 @@ if (btnNb2UnlockModel) {
     });
 }
 
-if (UI.btnNb2On) {
-    UI.btnNb2On.addEventListener('click', () => {
-        sendCmdObject({ breaker: 'on' });
-        addLog('[NB2] Sending remote CLOSE (breaker ON) command...', 'info');
-    });
-}
+if (UI.btnNb2On) UI.btnNb2On.addEventListener('click', breakerOn);
 const btnNb2OnModel = document.getElementById('btn-nb2-on-model');
-if (btnNb2OnModel) {
-    btnNb2OnModel.addEventListener('click', () => {
-        sendCmdObject({ breaker: 'on' });
-        addLog('[NB2] Sending remote CLOSE (breaker ON) command...', 'info');
-    });
-}
+if (btnNb2OnModel) btnNb2OnModel.addEventListener('click', breakerOn);
 
-if (UI.btnNb2Off) {
-    UI.btnNb2Off.addEventListener('click', () => {
-        sendCmdObject({ breaker: 'off' });
-        addLog('[NB2] Sending remote OPEN (breaker OFF) command...', 'warning');
-    });
-}
+if (UI.btnNb2Off) UI.btnNb2Off.addEventListener('click', () => breakerOff({ label: 'panel' }));
 const btnNb2OffModel = document.getElementById('btn-nb2-off-model');
-if (btnNb2OffModel) {
-    btnNb2OffModel.addEventListener('click', () => {
-        // Safety confirm — opening the breaker cuts AC power to the whole station
-        if (!confirm('⚠️ BREAKER OFF WARNING\n\nOpening the breaker will cut power to the entire production station — motor, sensors, and all field equipment will de-energise immediately.\n\nProceed only if the line is stopped and it is safe to do so.\n\nPress OK to open the breaker.')) return;
-        if (!HW.connected) {
-            addLog('[NB2] Not connected to hardware — command NOT sent.', 'warning');
-            return;
-        }
-        sendCmdObject({ breaker: 'off' });
-        addLog('[NB2] ⚠️ Remote OPEN command sent — station power cut.', 'warning');
-    });
-}
-// HARD POWER CUT — Emergency breaker trip via NB2 RS485
+if (btnNb2OffModel) btnNb2OffModel.addEventListener('click', () => breakerOff({ label: 'panel' }));
+
+// HARD POWER CUT — e-stop the motor first, then trip the breaker
 if (UI.btnHardOff) {
-    UI.btnHardOff.addEventListener('click', () => {
-        if (confirm('⚡ HARD POWER CUT\n\nThis will remotely OPEN the NB2 circuit breaker, cutting AC mains power.\n\nAre you sure?')) {
-            // First: stop motor via MQTT
-            sendCmdObject({ cmd: 'estop' });
-            // Then: trip the breaker
-            setTimeout(() => {
-                sendCmdObject({ breaker: 'off' });
-                addLog('[NB2] ⚡ HARD POWER CUT — Breaker OPEN command sent!', 'error');
-            }, 200);
-        }
-    });
+    UI.btnHardOff.addEventListener('click', () => breakerOff({ estopFirst: true, label: 'hard-cut' }));
 }
 
 
