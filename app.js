@@ -2547,6 +2547,23 @@ const camPanRight = document.getElementById("cam-pan-right");
 
 const camZoomWrapper = document.getElementById("cam-zoom-wrapper");
 const camfeedViewport = document.getElementById("camfeed-viewport");
+const camFeedIframe = document.getElementById("cam-feed-iframe");
+
+// go2rtc's stream.html won't render its player below 320px wide and overflows a
+// smaller panel. Render the iframe at a fixed 640px logical width and scale it
+// down to exactly fill the viewport. (camZoom is applied separately on the
+// wrapper, so pinch-zoom still composes on top of this.)
+const CAM_IFRAME_W = 640;
+function fitCamIframe() {
+    if (!camFeedIframe || !camfeedViewport) return;
+    const s = camfeedViewport.clientWidth / CAM_IFRAME_W;
+    if (s > 0) camFeedIframe.style.transform = `scale(${s})`;
+}
+if (camfeedViewport && typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(fitCamIframe).observe(camfeedViewport);
+}
+window.addEventListener("resize", fitCamIframe);
+fitCamIframe();
 
 function clampPan() {
     if (camZoom <= 1.0) {

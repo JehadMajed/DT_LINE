@@ -2261,11 +2261,19 @@ model-viewer {
   border: 1px solid var(--border);
 }
 
+/* go2rtc's stream.html forces `flex: 1 0 320px` on its <video-stream>, so it
+   refuses to render narrower than 320px and overflows a smaller panel (frame
+   shifted right, edge + "RTC" label clipped). Fix: render the iframe at a fixed
+   640px logical width and scale it to fit the viewport (see fitCamIframe() in
+   app.js). #cam-zoom-wrapper stays overflow:hidden and clips the scaled result. */
 .cam-media {
-  display: block;
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 640px;
+  height: 360px;
   border: none;
+  transform-origin: top left;
 }
 
 .camfeed-controls {
