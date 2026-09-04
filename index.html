@@ -88,11 +88,9 @@
                     <h2 class="sec-heading">Executive Overview</h2>
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
-                    <select id="select-broker-profile" class="cmd-btn" style="width:auto;padding:0 12px;">
-                        <option value="hivemq" selected>HiveMQ Cloud</option>
-                        <option value="emqx">EMQX Cloud</option>
-                        <option value="cloudflare">Cloudflare Tunnel (URL changes each restart)</option>
-                    </select>
+                    <!-- Broker selection is automatic: primary with fallback, and it
+                         returns to the primary on its own. Read-only indicator. -->
+                    <span id="broker-status" class="broker-status is-primary">HiveMQ Cloud</span>
                     <button id="btn-mqtt-connect" class="cmd-btn" style="width:auto;padding:0 20px;">Connect Live
                         Hardware</button>
                     <span id="status-pill" class="live-pill" style="display:none;">LIVE</span>
