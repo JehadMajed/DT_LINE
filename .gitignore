@@ -8,3 +8,6 @@ __pycache__/
 # Editor / OS
 .DS_Store
 Thumbs.db
+
+# Firmware rollback image (4MB binary)
+backup/

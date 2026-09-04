@@ -154,12 +154,136 @@ def on_connect(client, userdata, flags, rc):
 def on_disconnect(client, userdata, rc):
     print(f"[{userdata}] Disconnected (rc={rc}); paho will auto-reconnect.")
 
+# -- Operator intent + heartbeat relay ---------------------------------------
+# The firmware force-stops the motor (and reverts to MANUAL) if it sees no
+# serial command for REMOTE_COMMAND_TIMEOUT_MS = 3000 -- measured, not assumed.
+# Previously the dashboard heartbeat had to cross a cloud broker to satisfy
+# that, so any broker hiccup >3s stopped the belt and silently disarmed REMOTE.
+#
+# Now the dashboard heartbeat expresses OPERATOR INTENT only, held here with a
+# 6s budget, and this thread feeds the firmware deadman locally over USB every
+# 1s. The safety property holds by construction: if this process dies the relay
+# dies with it, and the firmware stops the motor within 3s. The relay can only
+# ever repeat a command the operator actually sent.
+OPERATOR_TIMEOUT_S = 6.0     # no dashboard traffic for this long -> stop
+RELAY_INTERVAL_S   = 1.0     # must stay well under the firmware 3s deadman
+MAX_RUN_S          = 600.0   # unattended run cap; expires intent regardless
+RELAY_PAYLOAD      = json.dumps({"mode": "remote"})   # feeds deadman, starts nothing
+
+_intent_lock     = threading.Lock()
+_intent_cmd      = None      # last motor command the operator actually sent
+_intent_deadline = 0.0       # wall-clock time when operator intent expires
+_intent_started  = 0.0       # when this run began (for MAX_RUN_S)
+
+def serial_write(command_json, label):
+    """Write one command to the ESP32, reopening the port once on failure."""
+    for attempt in range(2):
+        try:
+            with _ser_lock:
+                if ser is None:
+                    raise serial.SerialException("port not open")
+                ser.write((command_json + "\n").encode("utf-8"))
+                ser.flush()
+            return True
+        except Exception as e:
+            print(f"Error forwarding command to serial ({label}, attempt {attempt+1}): {e}")
+            try_reopen_serial_once()
+    print(f"Command DROPPED ({label}) - serial unavailable after reconnect.")
+    return False
+
+def note_operator_command(obj, raw):
+    """Update run-intent from a dashboard command. Any stop clears it at once."""
+    global _intent_cmd, _intent_deadline, _intent_started
+    if not isinstance(obj, dict):
+        return
+    now = time.time()
+
+    # Anything meaning "not running" drops intent immediately.
+    if obj.get("cmd") == "stop" or obj.get("mode") == "manual" or obj.get("speed") == 0:
+        with _intent_lock:
+            if _intent_cmd is not None:
+                print("[RELAY] operator intent cleared (explicit stop/manual)")
+            _intent_cmd = None
+            _intent_deadline = 0.0
+        return
+
+    if obj.get("cmd") == "start":
+        with _intent_lock:
+            if _intent_cmd is None:
+                _intent_started = now
+                print(f"[RELAY] operator intent ARMED: {raw}")
+            _intent_cmd = raw
+            _intent_deadline = now + OPERATOR_TIMEOUT_S
+    elif _intent_cmd is not None:
+        # Heartbeat / mode refresh while running: extend the budget only.
+        with _intent_lock:
+            _intent_deadline = now + OPERATOR_TIMEOUT_S
+
+def note_device_state(t):
+    """Defence in depth: if the device leaves REMOTE while we hold operator
+    intent, something stopped the machine that we did not ask for -- the
+    firmware deadman fired, the operator chose MANUAL, or someone hit the
+    joystick. All three must require a fresh, deliberate start command.
+    With the mode-only relay this should be unreachable in normal operation,
+    so if it ever fires it is telling us something we do not understand
+    happened."""
+    global _intent_cmd, _intent_deadline
+    if not isinstance(t, dict) or t.get("control_mode") != "manual":
+        return
+    with _intent_lock:
+        if _intent_cmd is None:
+            return
+        _intent_cmd = None
+        _intent_deadline = 0.0
+    print("[RELAY] device reverted to MANUAL while intent held -> "
+          "intent LATCHED OFF, a fresh start command is required")
+    publish_all(TOPIC_EVENT, json.dumps({
+        "ts": time.time(), "kind": "run_intent_latched_off",
+        "reason": "device_left_remote"}))
+
+def relay_loop():
+    """Feed the firmware deadman locally while operator intent is live."""
+    global _intent_cmd, _intent_deadline
+    while not _stop.is_set():
+        _stop.wait(RELAY_INTERVAL_S)
+        if _stop.is_set():
+            break
+        now = time.time()
+        with _intent_lock:
+            cmd = _intent_cmd
+            deadline = _intent_deadline
+            started = _intent_started
+        if cmd is None:
+            continue
+
+        reason = None
+        if now >= deadline:
+            reason = "operator_timeout"
+        elif now - started >= MAX_RUN_S:
+            reason = "max_run_duration"
+        if reason:
+            with _intent_lock:
+                _intent_cmd = None
+                _intent_deadline = 0.0
+            print(f"[RELAY] intent EXPIRED ({reason}) -> sending stop")
+            serial_write(json.dumps({"cmd": "stop"}), "relay-stop")
+            publish_all(TOPIC_EVENT, json.dumps({
+                "ts": now, "kind": "run_intent_expired", "reason": reason}))
+            continue
+
+        # Mode-only heartbeat. This refreshes the firmware deadman
+        # (lastRemoteCommandTime) but carries no speed, so it can never restart
+        # a motor the firmware has safety-stopped. targetSpeedPercent is held in
+        # firmware, so a normally running motor keeps running.
+        serial_write(RELAY_PAYLOAD, "relay")
+
 # MQTT Callback for receiving commands from the Dashboard (any broker)
 def on_message(client, userdata, msg):
     global ser
     command_json = msg.payload.decode('utf-8', errors='ignore').strip()
 
     # Gate the one destructive command: breaker OFF must carry the passphrase.
+    obj = None
     if command_json.startswith('{'):
         try:
             obj = json.loads(command_json)
@@ -181,18 +305,8 @@ def on_message(client, userdata, msg):
             print(f"[AUTH] breaker OFF authorized from {userdata}")
 
     print(f"[MQTT:{userdata} -> ESP32] Sending: {command_json}")
-    for attempt in range(2):
-        try:
-            with _ser_lock:
-                if ser is None:
-                    raise serial.SerialException("port not open")
-                ser.write((command_json + '\n').encode('utf-8'))
-                ser.flush()
-            return
-        except Exception as e:
-            print(f"Error forwarding command to serial (attempt {attempt+1}): {e}")
-            try_reopen_serial_once()
-    print("Command DROPPED — serial unavailable after reconnect.")
+    note_operator_command(obj, command_json)
+    serial_write(command_json, f"mqtt:{userdata}")
 
 # Initialize one MQTT client per enabled broker plan
 clients = {}
@@ -236,6 +350,10 @@ def publish_all(topic, payload):
             print(f"[{name}] Publish failed: {e}")
 
 # Main loop: Read from Serial and publish to all connected brokers
+_relay_thread = threading.Thread(target=relay_loop, name="relay", daemon=True)
+_relay_thread.start()
+print(f"[RELAY] heartbeat relay active (operator budget {OPERATOR_TIMEOUT_S}s, relay every {RELAY_INTERVAL_S}s, run cap {MAX_RUN_S}s)")
+
 print(f"Listening for telemetry... Active plans: {list(clients.keys())}. Press Ctrl+C to exit.")
 _read_errors = 0
 try:
@@ -266,6 +384,12 @@ try:
 
                     # Publish to every active broker plan
                     publish_all(TOPIC_TELEMETRY, json_str)
+
+                    # Latch intent off if the device left REMOTE.
+                    try:
+                        note_device_state(json.loads(json_str))
+                    except Exception:
+                        pass
 
                     # Parse and print full formatted readings
                     try:
