@@ -10,6 +10,7 @@ import hmac
 import uuid
 import dt_store
 import hashlib
+import subprocess
 
 # Fail fast if a second copy of this script is already running (it would fight
 # for the serial port and silently break commands). Uses a pid lock file.
@@ -150,7 +151,7 @@ except OSError:
 # forwarded to serial from whichever broker delivers them first.
 BROKERS = {
     # Plan A: local Mosquitto on the Pi, exposed publicly via `cloudflared tunnel`.
-    'cloudflare': {
+    'local': {
         'enabled': True,
         'host': '127.0.0.1',
         'port': 1883,
@@ -339,6 +340,157 @@ def health_loop():
         except Exception as e:
             print(f"[HEALTH] sample failed: {e}")
 
+# -- Escalating recovery ------------------------------------------------------
+# Every rung stops the belt as a side effect, which is the safe direction: a
+# DTR/RTS reset and a USB power cut both leave the firmware booting into MANUAL
+# with the motor at zero. Nothing here can start a motor.
+#
+# The ladder only climbs while the DEVICE is silent, and it is armed only after
+# telemetry has actually been seen once -- it will not fire against a device
+# that was never present (e.g. a boot with the ESP32 unplugged).
+#
+# Thresholds are measured against the last serial telemetry, which arrives at
+# 1 Hz, so 15 s is 15 missed packets: far outside jitter, and well past the
+# firmware 3 s deadman, so by the time rung 1 fires the motor is already
+# stopped by the firmware itself.
+RECOVERY_SOFT_RESET_S  = 15    # rung 1: DTR/RTS soft reset (no power interruption)
+RECOVERY_POWER_CYCLE_S = 30    # rung 2: DISABLED (see below)
+RECOVERY_GIVE_UP_S     = 60    # rung 3: alert and STOP retrying
+
+# Rung 2 -- the uhubctl VBUS cycle -- is PERMANENTLY DISABLED by owner
+# instruction. It is the only automatic action that could leave the site
+# unrecoverable: if the port fails to re-enumerate after the power cut, there is
+# no physical access to plug it back in. The ladder therefore runs
+# 15 s soft reset -> 60 s give up. The rung is kept in code and logs what it
+# WOULD have done, so the escalation stays visible in the incident record and a
+# human can still run the cycle manually if they judge it worth the risk:
+#     sudo uhubctl -e -l 1 -p 1 -a cycle -d 2
+RECOVERY_POWER_CYCLE_ENABLED = False
+
+# -e is mandatory: without it uhubctl USB3-duality handling also hits hub 2.
+UHUBCTL_CYCLE = ["sudo", "-n", "/usr/sbin/uhubctl",
+                 "-e", "-l", "1", "-p", "1", "-a", "cycle", "-d", "2"]
+
+_recovery_stage = 0            # 0 none, 1 soft reset done, 2 power cycle done,
+                               # 3 gave up
+_recovery_lock = threading.Lock()
+
+def _drop_intent(reason):
+    """Any recovery action is an unexplained stop: require a fresh, deliberate
+    start command afterwards rather than letting the relay resume on its own."""
+    global _intent_cmd, _intent_deadline
+    with _intent_lock:
+        had = _intent_cmd is not None
+        _intent_cmd = None
+        _intent_deadline = 0.0
+    if had:
+        print(f"[RECOVERY] operator intent dropped ({reason})")
+        STORE.log_event("run_intent_dropped", severity="warn",
+                        detail={"reason": reason})
+
+def recovery_soft_reset(gap_ms):
+    """Pulse DTR/RTS on the port we already hold. No power interruption."""
+    print(f"[RECOVERY] rung 1: DTR/RTS soft reset (device silent {gap_ms} ms)")
+    STORE.log_event("recovery_soft_reset", severity="warn", detail={"gap_ms": gap_ms})
+    publish_all(TOPIC_EVENT, json.dumps(
+        {"kind": "recovery_soft_reset", "gap_ms": gap_ms, "ts": now_ms()}), force=True)
+    try:
+        with _ser_lock:
+            if ser is None:
+                raise serial.SerialException("port not open")
+            ser.setDTR(False)
+            ser.setRTS(True)
+            time.sleep(0.1)
+            ser.setRTS(False)
+        return True
+    except Exception as e:
+        print(f"[RECOVERY] soft reset failed: {e}")
+        STORE.log_event("recovery_soft_reset_failed", severity="error",
+                        detail={"error": str(e)})
+        return False
+
+def recovery_power_cycle(gap_ms):
+    """Cut VBUS to the ESP32. Proven to re-enumerate on this Pi in ~2 s, but it
+    is the last automatic lever: if the port fails to come back there is no
+    physical access to recover it."""
+    print(f"[RECOVERY] rung 2: uhubctl VBUS cycle (device silent {gap_ms} ms)")
+    STORE.log_event("recovery_power_cycle", severity="warn", detail={"gap_ms": gap_ms})
+    publish_all(TOPIC_EVENT, json.dumps(
+        {"kind": "recovery_power_cycle", "gap_ms": gap_ms, "ts": now_ms()}), force=True)
+    try:
+        r = subprocess.run(UHUBCTL_CYCLE, capture_output=True, text=True, timeout=40)
+        ok = r.returncode == 0
+        if not ok:
+            print(f"[RECOVERY] uhubctl failed rc={r.returncode}: {r.stderr.strip()[:200]}")
+            STORE.log_event("recovery_power_cycle_failed", severity="error",
+                            detail={"rc": r.returncode, "stderr": r.stderr[:400]})
+        return ok
+    except Exception as e:
+        print(f"[RECOVERY] uhubctl error: {e}")
+        STORE.log_event("recovery_power_cycle_failed", severity="error",
+                        detail={"error": str(e)})
+        return False
+
+def recovery_power_cycle_skipped(gap_ms):
+    """Rung 2 reached but disabled. Record it loudly: the operator needs to know
+    the ladder wanted to power-cycle and was not permitted to."""
+    print(f"[RECOVERY] rung 2 REACHED but DISABLED (device silent {gap_ms} ms). "
+          f"A human may run: sudo uhubctl -e -l 1 -p 1 -a cycle -d 2")
+    STORE.log_event("recovery_power_cycle_skipped", severity="warn",
+                    detail={"gap_ms": gap_ms, "reason": "disabled_by_policy"})
+    publish_all(TOPIC_EVENT, json.dumps(
+        {"kind": "recovery_power_cycle_skipped", "gap_ms": gap_ms, "ts": now_ms(),
+         "detail": "automatic USB power cycle is disabled; manual action required"}),
+        force=True)
+
+def recovery_give_up(gap_ms):
+    """Stop acting. Repeating a failed power cycle forever would hide the fault
+    and thrash the port; a human needs to look at it."""
+    print(f"[RECOVERY] rung 3: GIVING UP after {gap_ms} ms of silence. "
+          f"The soft reset did not restore telemetry and the power cycle is "
+          f"disabled by policy. Manual intervention required.")
+    STORE.log_event("recovery_gave_up", severity="error", detail={"gap_ms": gap_ms})
+    publish_all(TOPIC_EVENT, json.dumps(
+        {"kind": "recovery_gave_up", "gap_ms": gap_ms, "ts": now_ms(),
+         "detail": "soft reset failed; power cycle disabled by policy"}),
+        force=True)
+
+def service_recovery(gap_ms):
+    """Climb one rung at most per call. Called from the liveness timer."""
+    global _recovery_stage
+    with _recovery_lock:
+        stage = _recovery_stage
+        if stage >= 3:
+            return
+        if gap_ms >= RECOVERY_GIVE_UP_S * 1000 and stage >= 2:
+            _recovery_stage = 3
+            action = recovery_give_up
+        elif gap_ms >= RECOVERY_POWER_CYCLE_S * 1000 and stage == 1:
+            _recovery_stage = 2
+            action = (recovery_power_cycle if RECOVERY_POWER_CYCLE_ENABLED
+                      else recovery_power_cycle_skipped)
+        elif gap_ms >= RECOVERY_SOFT_RESET_S * 1000 and stage == 0:
+            _recovery_stage = 1
+            action = recovery_soft_reset
+        else:
+            return
+    _drop_intent("recovery action")
+    action(gap_ms)
+
+def recovery_reset(stage_when_recovered):
+    global _recovery_stage
+    with _recovery_lock:
+        _recovery_stage = 0
+    if stage_when_recovered:
+        names = {1: "soft_reset", 2: "power_cycle", 3: "after_give_up"}
+        print(f"[RECOVERY] device returned after "
+              f"{names.get(stage_when_recovered, stage_when_recovered)}")
+        STORE.log_event("recovery_succeeded",
+                        detail={"stage": names.get(stage_when_recovered)})
+        publish_all(TOPIC_EVENT, json.dumps(
+            {"kind": "recovery_succeeded", "ts": now_ms(),
+             "stage": names.get(stage_when_recovered)}), force=True)
+
 # -- Device liveness + retained state document -------------------------------
 _state_lock     = threading.Lock()
 _last_device_ms = 0        # when serial telemetry last arrived
@@ -378,6 +530,7 @@ def note_device_telemetry(t):
             _device_online = True
             recovered = True
     if recovered:
+        recovery_reset(_recovery_stage)
         print("[LIVENESS] device_online -> TRUE")
         STORE.log_event("device_online", detail={"boot_id": BOOT_ID})
         note_link_up("device", SERIAL_PORT, "telemetry resumed")
@@ -395,10 +548,10 @@ def liveness_loop():
             break
         with _state_lock:
             last, online = _last_device_ms, _device_online
-        if not online or not last:
-            continue
+        if not last:
+            continue          # never seen the device: nothing to recover
         gap = now_ms() - last
-        if gap > DEVICE_TIMEOUT_S * 1000:
+        if online and gap > DEVICE_TIMEOUT_S * 1000:
             with _state_lock:
                 _device_online = False
             print(f"[LIVENESS] device_online -> FALSE (silent {gap} ms)")
@@ -407,6 +560,10 @@ def liveness_loop():
             publish_all(TOPIC_EVENT, json.dumps(
                 {"kind": "device_offline", "gap_ms": gap, "ts": now_ms()}), force=True)
             publish_state(force=True)
+        elif not online:
+            # Already known offline: climb the recovery ladder. Armed only
+            # because `last` is non-zero, i.e. telemetry was seen at least once.
+            service_recovery(gap)
 
 # -- State signature -> throttle bypass --------------------------------------
 # Cloud plans are throttled to 1 msg/5s per topic to stay inside free tiers.

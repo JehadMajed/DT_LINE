@@ -5,23 +5,44 @@
 set -u
 LOG() { echo "$(date '+%F %T') $*"; }
 
+# Count/kill only REAL bridge processes: those whose executable is python.
+# `pgrep -f serial_mqtt_bridge.py` also matches any shell, ssh command, grep or
+# log tail that merely mentions the script, and acting on that would pkill -9
+# the live bridge. This bit us during testing and caused a real outage.
+bridge_pids() {
+    local p exe
+    for p in $(pgrep -f serial_mqtt_bridge.py 2>/dev/null); do
+        exe=$(readlink -f "/proc/$p/exe" 2>/dev/null || true)
+        case "$exe" in
+            */python*) echo "$p" ;;
+        esac
+    done
+}
+
 # 1) Exactly one bridge process. If 0 -> restart. If >1 -> kill all, restart.
-N=$(pgrep -cf serial_mqtt_bridge.py || true)
+N=$(bridge_pids | grep -c . || true)
 if [ "${N:-0}" -eq 0 ]; then
     LOG "no bridge process -> restart"
     sudo systemctl restart dt-bridge
 elif [ "${N:-0}" -gt 1 ]; then
     LOG "$N bridge processes (duplicate!) -> kill all + restart"
-    pkill -9 -f serial_mqtt_bridge.py
+    for p in $(bridge_pids); do kill -9 "$p" 2>/dev/null || true; done
     sleep 2
     sudo systemctl restart dt-bridge
 fi
 
-# 2) Bridge liveness: a telemetry line logged in the last 90s?
+# 2) Bridge liveness: is the bridge main loop still turning?
+#    NOT "is telemetry arriving" -- that conflates a wedged BRIDGE with a silent
+#    DEVICE, and the escalating recovery ladder already owns device silence.
+#    Restarting the bridge because the ESP32 went quiet would fight the ladder.
+#    The [SUMMARY] line is printed every 30s regardless of device state, so its
+#    absence means the loop itself is stuck. (The old check grepped for
+#    "ESP32 -> MQTT", a per-packet line that journal thinning removed -- it
+#    would have matched zero and restarted the bridge every 2 minutes forever.)
 if systemctl is-active --quiet dt-bridge; then
-    seen=$(journalctl -u dt-bridge --since "90 seconds ago" --no-pager 2>/dev/null | grep -c "ESP32 -> MQTT")
+    seen=$(journalctl -u dt-bridge --since "90 seconds ago" --no-pager 2>/dev/null | grep -c "\[SUMMARY\]")
     if [ "${seen:-0}" -eq 0 ]; then
-        LOG "bridge alive but no telemetry in 90s -> restart"
+        LOG "bridge loop stalled (no [SUMMARY] in 90s) -> restart"
         sudo systemctl restart dt-bridge
     fi
 fi
