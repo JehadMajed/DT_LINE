@@ -5,6 +5,9 @@
 __pycache__/
 *.pyc
 
+# Cloudflare / Wrangler build cache
+.wrangler/
+
 # Editor / OS
 .DS_Store
 Thumbs.db
