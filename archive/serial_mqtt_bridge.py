@@ -9,6 +9,7 @@ import sys
 import hmac
 import uuid
 import dt_store
+import hashlib
 
 # Fail fast if a second copy of this script is already running (it would fight
 # for the serial port and silently break commands). Uses a pid lock file.
@@ -85,6 +86,46 @@ LOCAL_ONLY_TOPICS = {TOPIC_ENCODER}
 # and signature changes plus device_online flips force-publish past the
 # throttle. Only the idle heartbeat slows down.
 TOPIC_CLOUD_MIN_INTERVAL = {TOPIC_STATE: 15}
+
+# -- Cross-broker command dedupe ----------------------------------------------
+# All three subscriptions stay live: the dashboard fails over between brokers
+# after 25 s of silence, so a single operator legitimately changes broker
+# mid-run. Arbitrating by broker would turn that failover into a command
+# blackout. Real arbitration needs a client identity the deployed dashboard
+# does not send yet, so this dedupes and audits only -- it does not arbitrate.
+#
+# Suppression is deliberately narrow: the SAME key from a DIFFERENT broker
+# inside the window. Sequential repeats from ONE broker must pass through
+# untouched -- the dashboard heartbeat is a repeated identical
+# {"mode":"remote"}, and suppressing those would break intent refresh and stop
+# the belt.
+DEDUPE_WINDOW_S = 1.0
+DEDUPE_MAX = 256
+_dedupe = {}                  # key -> (first_seen_monotonic, broker)
+_dedupe_lock = threading.Lock()
+
+def dedupe_key(obj, raw):
+    """Prefer an explicit command id; fall back to a hash of the payload."""
+    if isinstance(obj, dict) and obj.get("id"):
+        return "id:" + str(obj["id"])
+    return "sha:" + hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()
+
+def is_cross_broker_duplicate(key, broker):
+    now = time.monotonic()
+    with _dedupe_lock:
+        if len(_dedupe) > DEDUPE_MAX:
+            cutoff = now - DEDUPE_WINDOW_S
+            for k in [k for k, (t, _) in _dedupe.items() if t < cutoff]:
+                del _dedupe[k]
+            if len(_dedupe) > DEDUPE_MAX:      # still full of fresh entries
+                _dedupe.clear()
+        hit = _dedupe.get(key)
+        if hit and hit[1] != broker and (now - hit[0]) < DEDUPE_WINDOW_S:
+            return True
+        # Record/refresh only for the broker that actually owns this key, so a
+        # same-broker repeat simply resets its own timestamp and passes.
+        _dedupe[key] = (now, broker)
+        return False
 
 # ── Breaker-OFF authorization ────────────────────────────────────────────────
 # Opening the NB2 breaker cuts AC mains to the whole station. The dashboard must
@@ -537,6 +578,10 @@ def on_message(client, userdata, msg):
                 print(f"[AUTH] REJECTED breaker OFF from {userdata} (bad/missing key)")
                 STORE.log_event("breaker_off_rejected", severity="warn",
                                 detail={"broker": userdata})
+                STORE.log_command(str(obj.get("id") or uuid.uuid4().hex), userdata,
+                                  "{\"breaker\":\"off\"}", "rejected",
+                                  src=obj.get("src"),
+                                  error="bad or missing breaker passphrase")
                 try:
                     for c in clients.values():
                         c.publish(TOPIC_EVENT, json.dumps({
@@ -548,13 +593,55 @@ def on_message(client, userdata, msg):
             command_json = json.dumps(obj)   # forward without the passphrase
             print(f"[AUTH] breaker OFF authorized from {userdata}")
 
-    print(f"[MQTT:{userdata} -> ESP32] Sending: {command_json}")
-    note_operator_command(obj, command_json)
-    ok = serial_write(command_json, f"mqtt:{userdata}")
-    # No device ACK exists yet (item 5), so forwarded_ok records only that the
-    # bytes reached the serial port -- deliberately not an execution claim.
-    STORE.log_command(uuid.uuid4().hex, userdata, command_json, ok,
-                      None if ok else "serial write failed")
+    # Malformed payloads are recorded rather than silently dropped.
+    if not isinstance(obj, dict):
+        print(f"[MQTT:{userdata}] MALFORMED command dropped: {command_json[:120]}")
+        STORE.log_command(uuid.uuid4().hex, userdata, command_json, "malformed",
+                          error="payload is not a JSON object")
+        return
+
+    cmd_id = str(obj.get("id") or uuid.uuid4().hex)
+    src = obj.get("src")
+    key = dedupe_key(obj, command_json)
+
+    if is_cross_broker_duplicate(key, userdata):
+        print(f"[MQTT:{userdata}] duplicate {cmd_id} suppressed "
+              f"(same command already taken from another broker)")
+        STORE.log_command(cmd_id, userdata, command_json, "duplicate", src=src)
+        return
+
+    # Strip routing metadata before the wire: the firmware parses strictly and
+    # rejects payloads over 240 chars, so there is no reason to spend the bytes.
+    if "id" in obj or "src" in obj:
+        wire = json.dumps({k: v for k, v in obj.items() if k not in ("id", "src")},
+                          separators=(",", ":"))
+    else:
+        wire = command_json          # legacy command: forward byte-for-byte
+
+    print(f"[MQTT:{userdata} -> ESP32] Sending: {wire}")
+    note_operator_command(obj, wire)
+    ok = serial_write(wire, f"mqtt:{userdata}")
+
+    STORE.log_command(cmd_id, userdata, wire,
+                      "forwarded" if ok else "serial_error", src=src,
+                      error=None if ok else "serial write failed")
+
+    # Stage (b): received by the bridge and written to the port. This is a
+    # fact, unlike inferring success from a later telemetry effect, which
+    # cannot distinguish "never reached the device" from "reached it and had
+    # no effect".
+    #
+    # NOT emitted for a bare mode refresh. The dashboard heartbeat is
+    # {"mode":"remote"} every 700 ms, i.e. ~1.43 commands/s while running, and
+    # acking each one would force-publish ~86 events/min per cloud broker past
+    # the throttle -- about 617k messages/month per broker for 4 h/day of
+    # running, on a ~1M tier. Heartbeats are not operator actions and the
+    # frontend does not track them; real commands still get their ack.
+    is_heartbeat = set(obj) <= {"mode", "id", "src"}
+    if ok and not is_heartbeat:
+        publish_all(TOPIC_EVENT, json.dumps(
+            {"kind": "cmd_forwarded", "id": cmd_id, "ts": now_ms(),
+             "broker": userdata}), force=True)
 
 # Initialize one MQTT client per enabled broker plan
 clients = {}

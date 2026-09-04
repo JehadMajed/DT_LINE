@@ -32,9 +32,12 @@ SCHEMA = [
          severity TEXT, kind TEXT, detail_json TEXT)""",
     "CREATE INDEX IF NOT EXISTS ix_events_ts ON events(ts)",
     """CREATE TABLE IF NOT EXISTS commands (
-         cmd_id TEXT PRIMARY KEY, ts_received INTEGER NOT NULL,
-         source_broker TEXT, payload TEXT, forwarded_ok INTEGER, error TEXT)""",
+         id INTEGER PRIMARY KEY AUTOINCREMENT, cmd_id TEXT,
+         ts_received INTEGER NOT NULL,
+         src TEXT, source_broker TEXT, payload TEXT,
+         outcome TEXT, forwarded_ok INTEGER, error TEXT)""",
     "CREATE INDEX IF NOT EXISTS ix_commands_ts ON commands(ts_received)",
+    "CREATE INDEX IF NOT EXISTS ix_commands_cmdid ON commands(cmd_id)",
     """CREATE TABLE IF NOT EXISTS connections (
          id INTEGER PRIMARY KEY AUTOINCREMENT, ts_up INTEGER, ts_down INTEGER,
          link TEXT, endpoint TEXT, downtime_ms INTEGER, reason TEXT)""",
@@ -129,14 +132,19 @@ class Store:
             (ts or int(time.time() * 1000), severity, kind,
              json.dumps(detail) if detail is not None else None))
 
-    def log_command(self, cmd_id, source_broker, payload, forwarded_ok,
-                    error=None, ts=None):
+    def log_command(self, cmd_id, source_broker, payload, outcome,
+                    src=None, error=None, ts=None):
+        """outcome: forwarded | duplicate | serial_error | malformed | rejected.
+        Everything is recorded, including commands we refused to act on -- a
+        command that fails to parse is exactly the thing there was previously
+        no record of."""
         self._put(
-            """INSERT OR REPLACE INTO commands
-                 (cmd_id, ts_received, source_broker, payload, forwarded_ok, error)
-               VALUES (?,?,?,?,?,?)""",
-            (cmd_id, ts or int(time.time() * 1000), source_broker, payload,
-             int(bool(forwarded_ok)), error))
+            """INSERT INTO commands
+                 (cmd_id, ts_received, src, source_broker, payload,
+                  outcome, forwarded_ok, error)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (cmd_id, ts or int(time.time() * 1000), src, source_broker, payload,
+             outcome, int(outcome == "forwarded"), error))
 
     def log_connection(self, link, endpoint, ts_down=None, ts_up=None,
                        downtime_ms=None, reason=None):
@@ -171,6 +179,27 @@ class Store:
         db.execute("PRAGMA synchronous=NORMAL")
         for stmt in SCHEMA:
             db.execute(stmt)
+        # Additive migration for databases created before src/outcome existed.
+        for col, decl in (("src", "TEXT"), ("outcome", "TEXT")):
+            try:
+                db.execute("ALTER TABLE commands ADD COLUMN %s %s" % (col, decl))
+            except sqlite3.OperationalError:
+                pass          # already present
+        # Rebuild migration: older databases had cmd_id as the PRIMARY KEY,
+        # which made a duplicate delivery overwrite the forwarded one.
+        cols = [r[1] for r in db.execute("PRAGMA table_info(commands)")]
+        if "id" not in cols:
+            db.execute("ALTER TABLE commands RENAME TO commands_old")
+            for stmt in SCHEMA:
+                if "commands" in stmt:
+                    db.execute(stmt)
+            db.execute("""INSERT INTO commands
+                            (cmd_id, ts_received, src, source_broker, payload,
+                             outcome, forwarded_ok, error)
+                          SELECT cmd_id, ts_received, src, source_broker, payload,
+                                 outcome, forwarded_ok, error FROM commands_old""")
+            db.execute("DROP TABLE commands_old")
+            print("[STORE] migrated commands table to a surrogate primary key")
         db.commit()
         return db
 
