@@ -3401,9 +3401,15 @@ const CAM = {
         this.stop(true);
         try {
             const pc = new RTCPeerConnection({
-                // go2rtc advertises its own server-reflexive candidate, so the browser
-                // does not need to run its own STUN discovery to reach it.
-                iceServers: [],
+                // go2rtc advertises genuinely STUN-mapped server-reflexive candidates of
+                // its own, so strictly the browser could offer host candidates only. But
+                // the Pi sits behind carrier-grade NAT, and giving the browser its own
+                // srflx candidates lets ICE pair from either side rather than depending
+                // on one direction succeeding. Costs one STUN round trip at setup.
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun.cloudflare.com:3478' },
+                ],
                 bundlePolicy: 'max-bundle',
             });
             this.pc = pc;
