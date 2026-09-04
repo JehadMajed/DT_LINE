@@ -139,14 +139,28 @@ function updateNb2Buttons() {
 // ── MQTT Replica State ─────────────────────────────────────────────────────
 // Source of truth for the 3D Model tab. ONLY written by parseTelemetry().
 // No user interaction (button click, input change) should ever write here.
+// ── Freshness budget ─────────────────────────────────────────────────────────
+// Sized from a MEASURED 150 s capture of the live HiveMQ feed (2026-09-03):
+// digital_twin/motor/telemetry inter-packet gap min 2919 / p50 5056 / max 8031 ms.
+// That is the 5 s firmware tick beating against the bridge's 5 s min_interval
+// throttle. FRESH must sit above the observed max or the UI flaps into DELAYED
+// on normal operation.
+// Tighten to 1500/3000/5000 only after the firmware moves to 1 Hz publish-on-change
+// and the bridge stops throttling changed packets — otherwise the UI sits in STALE.
+const FRESH_MS   = 10000;  // <= this: FRESH
+const DELAYED_MS = 18000;  // <= this: DELAYED (dimmed + age badge)
+const STALE_MS   = 25000;  // >  DELAYED: STALE (twin frozen, values struck through)
+
 const MQTT_STATE = {
-    rpm: 0,           // live RPM from ESP32 encoder
+    rpm: 0,           // RPM currently being displayed
+    rpmMeasured: null,// data.rpm as reported by the ESP32
     isRunning: false, // motor is physically running
     proxDetected: false,  // current E18 proximity state
     pieceCount: 0,    // rising-edge counted pieces
     speedPercent: 0,  // PWM% sent by ESP32
     beltSpeed: 0,     // computed m/s via rpmToBeltSpeed()
     lastPacketTime: 0,// Date.now() of last parseTelemetry() call
+    lastRxMono: -Infinity, // performance.now() — monotonic, immune to clock steps/sleep
     isStale: false,   // true when > 3 s since last packet
     // NB2 Breaker replica state
     nb2: {
@@ -156,6 +170,87 @@ const MQTT_STATE = {
         faultFlags: 0, alarmFlags: 0, rs485Ok: false,
     },
 };
+
+// ── Freshness evaluation ─────────────────────────────────────────────────────
+// Age is measured on the MONOTONIC clock. Date.now() jumps when the OS clock is
+// stepped and when a laptop wakes from sleep, both of which produce nonsense ages.
+function telemetryAgeMs() {
+    if (MQTT_STATE.lastRxMono === -Infinity) return Infinity;
+    return performance.now() - MQTT_STATE.lastRxMono;
+}
+
+// One of: DISCONNECTED | FRESH | DELAYED | STALE_DATA
+function freshnessState() {
+    if (!HW.connected) return 'DISCONNECTED';
+    const age = telemetryAgeMs();
+    if (age === Infinity) return 'DISCONNECTED';
+    if (age <= FRESH_MS) return 'FRESH';
+    if (age <= DELAYED_MS) return 'DELAYED';
+    return 'STALE_DATA';
+}
+
+// True when the displayed values can still be believed.
+function dataUsable() {
+    const f = freshnessState();
+    return f === 'FRESH' || f === 'DELAYED';
+}
+
+// Human-readable age, for the badge shown next to every numeric readout.
+function ageLabel() {
+    const age = telemetryAgeMs();
+    if (age === Infinity) return 'no data';
+    return age < 1000 ? `${Math.round(age)} ms ago` : `${(age / 1000).toFixed(1)} s ago`;
+}
+
+// ── Freshness applied to the UI ──────────────────────────────────────────────
+// Sensor status pills must be able to go BACKWARDS. Previously parseTelemetry set
+// them to CONNECTED on every packet and nothing ever cleared them, so a dead feed
+// left a wall of green. These are re-evaluated on a timer, independent of packets.
+function applyFreshnessToUI() {
+    const state = freshnessState();
+    const usable = dataUsable();
+
+    // Whole-page staleness treatment: CSS dims values and shows age badges.
+    document.body.dataset.freshness = state;
+
+    const badge = document.getElementById('telemetry-age-badge');
+    if (badge) {
+        if (state === 'FRESH') {
+            badge.textContent = '';
+            badge.classList.add('hidden');
+        } else {
+            badge.classList.remove('hidden');
+            badge.textContent = state === 'DISCONNECTED'
+                ? 'DISCONNECTED — no live data'
+                : `${state === 'STALE_DATA' ? 'STALE' : 'DELAYED'} — last update ${ageLabel()}`;
+            badge.className = state === 'STALE_DATA' || state === 'DISCONNECTED'
+                ? 'telemetry-age-badge is-stale'
+                : 'telemetry-age-badge is-delayed';
+        }
+    }
+
+    // Sensor pills follow the data, not the last packet ever seen.
+    const pills = [
+        [UI.statusMotor, 'MOTOR'],
+        [UI.statusProximity, 'PROXIMITY'],
+        [UI.statusTemp, 'TEMP'],
+        [UI.statusBreaker, 'BREAKER'],
+        [UI.statusRs485, 'RS485'],
+    ];
+    if (!usable) {
+        for (const [el] of pills) {
+            if (!el) continue;
+            if (state === 'DISCONNECTED') {
+                el.textContent = 'DISCONNECTED';
+                el.className = 'inspect-status-pill status-critical';
+            } else {
+                el.textContent = 'STALE';
+                el.className = 'inspect-status-pill status-warning';
+            }
+        }
+    }
+
+}
 
 // Active tab identifier — render loop uses this to pick the correct RPM source.
 // 'model'  → MQTT_STATE.rpm only (real replica)
@@ -676,9 +771,15 @@ function parseTelemetry(rawString) {
         const mode = (data.control_mode || 'manual').toLowerCase();
         const isMoving = (dir === 'fwd' || dir === 'rev' || pwm > 0);
 
+        // Encoder RPM is captured but not used as the display source; the encoder is
+        // being investigated separately. Display continues to follow commanded PWM.
+        const rpmMeasured = (typeof data.rpm === 'number' && isFinite(data.rpm))
+            ? data.rpm
+            : null;
+
         let rpm = 0.0;
         if (mode === 'manual') {
-            // Manual mode movement: always set to Medium speed (60% PWM = 100.2 RPM, 0.077 m/s)
+            // Manual mode movement: Medium speed (60% PWM = 100.2 RPM, 0.077 m/s)
             rpm = isMoving ? 100.2 : 0.0;
         } else {
             // Remote mode movement: proportional to commanded PWM% (100% PWM = 167.0 RPM)
@@ -695,11 +796,14 @@ function parseTelemetry(rawString) {
 
         // ── Feed MQTT_STATE — the 3D Model tab reads ONLY from here ──────────
         MQTT_STATE.rpm = rpm;
+        MQTT_STATE.rpmMeasured = rpmMeasured;
         MQTT_STATE.isRunning = SIM.isRunning;
         MQTT_STATE.speedPercent = (mode === 'manual' && isMoving) ? 60 : pwm;
         MQTT_STATE.beltSpeed = rpmToBeltSpeed(rpm);
         MQTT_STATE.lastPacketTime = Date.now();
+        MQTT_STATE.lastRxMono = performance.now();
         MQTT_STATE.isStale = false;
+        if (typeof DTX !== 'undefined') DTX.onTelemetry(data);
 
         // ── NB2 Breaker: Parse real AC power data if present ────────────
         // Support both nested {"nb2": {...}} and flat {"voltage": ...} payloads from ESP
@@ -959,8 +1063,21 @@ function sendCmdObject(cmdObj) {
         return;
     }
     const payload = JSON.stringify(cmdObj);
-    HW.client.publish(MQTT_CFG.topicCmd, payload, { qos: 0 });
-    addLog(`[MQTT Command Sent] → ${payload}`, 'success');
+    // Register the command so telemetry can later confirm it actually took effect.
+    if (typeof DTX !== 'undefined') DTX.track(cmdObj);
+    // QoS 1: the broker acknowledges receipt, so "sent" means the broker owns it
+    // rather than "handed to a socket and hoped". At QoS 0 a dropped command was
+    // indistinguishable from a delivered one — and a dropped heartbeat lets the
+    // firmware's remote-command deadman force-stop the motor.
+    HW.client.publish(MQTT_CFG.topicCmd, payload, { qos: 1 }, (err) => {
+        if (err) {
+            addLog(`[MQTT Command FAILED] ${payload} — ${err.message}`, 'error');
+        } else {
+            // Only logged after PUBACK. This is delivery to the broker, NOT proof the
+            // device received, accepted or executed it — those need a device ack.
+            addLog(`[MQTT Command Sent] → ${payload}`, 'success');
+        }
+    });
 }
 
 // ── Connect to Mosquitto broker ────────────────────────────────────────────────
@@ -974,13 +1091,20 @@ function connectMQTT() {
     const profile = MQTT_CFG.activeProfile;
     addLog(`Connecting to MQTT broker [${profile.label}]: ${profile.brokerUrl} …`, 'info');
 
+    // Auto-reconnect is ON. It was previously disabled (reconnectPeriod: 0), which
+    // meant any transport interruption — a Wi-Fi blip, the laptop sleeping, the broker
+    // closing an idle session, the browser throttling a background tab — left the page
+    // dead until someone reloaded it. Backoff is applied in on('reconnect') below.
     const client = mqtt.connect(profile.brokerUrl, {
         clientId: MQTT_CFG.clientId,
-        keepalive: 30,
-        reconnectPeriod: 0,
-        connectTimeout: 5000,
+        keepalive: 20,
+        reconnectPeriod: 2000,
+        connectTimeout: 8000,
+        clean: true,
+        resubscribe: true,
         ...profile.options,
     });
+    HW.reconnectAttempt = 0;
 
     HW.client = client;
 
@@ -1022,6 +1146,10 @@ function connectMQTT() {
         if (UI.statusPill) UI.statusPill.classList.add('active');
         if (UI.status) UI.status.textContent = 'Hardware Mode';
         addLog('Hardware mode active — receiving live ESP32 telemetry JSON via MQTT.', 'success');
+        if (typeof DTX !== 'undefined') {
+            DTX.tried.clear(); DTX.armFailover(); DTX.updateControlsEnabled();
+            DTX.record('event', { event: 'connected', broker: (document.getElementById('select-broker-profile') || {}).value });
+        }
     });
 
     client.on('message', (topic, payload) => {
@@ -1037,31 +1165,64 @@ function connectMQTT() {
         }
     });
 
+    // Log errors, but NEVER destroy the client here — doing so was what killed
+    // auto-recovery. The client's own state machine owns reconnection.
     client.on('error', (err) => {
         addLog(`MQTT error: ${err.message}`, 'error');
-        HW.client = null;
-        HW.connected = false;
-        updateHwBadge(false);
+    });
+
+    // Exponential backoff with jitter, so a broker restart doesn't produce a
+    // thundering herd of reconnects from every open dashboard.
+    client.on('reconnect', () => {
+        HW.reconnectAttempt = (HW.reconnectAttempt || 0) + 1;
+        if (typeof DTX !== 'undefined') { DTX.health.reconnects++; DTX.record('event', { event: 'reconnect', attempt: HW.reconnectAttempt }); }
+        const base = Math.min(30000, 2000 * Math.pow(2, HW.reconnectAttempt - 1));
+        const delay = Math.round(base * (0.8 + Math.random() * 0.4));
+        client.options.reconnectPeriod = delay;
+        if (UI.status) UI.status.textContent = 'Reconnecting…';
+        addLog(`MQTT reconnecting — attempt ${HW.reconnectAttempt}, next try in ${(delay / 1000).toFixed(1)} s.`, 'warning');
     });
 
     client.on('close', () => {
         if (HW.connected) {
             HW.connected = false;
             HW.running = false;
-            HW.client = null;
+            HW.intentRunning = false;  // stop feeding the firmware deadman
             updateHwBadge(false);
-            if (UI.status) UI.status.textContent = 'Standby';
+            if (UI.status) UI.status.textContent = 'Reconnecting…';
             if (UI.statusPill) UI.statusPill.classList.remove('active');
-            addLog('MQTT disconnected — simulation mode restored.', 'warning');
+            addLog('MQTT connection lost — reconnecting automatically, no refresh needed.', 'warning');
         }
+        applyFreshnessToUI();
+    });
+
+    client.on('offline', () => {
+        HW.connected = false;
+        updateHwBadge(false);
+        applyFreshnessToUI();
     });
 }
+
+// Browsers throttle timers in hidden tabs (often to once a minute), so a tab left
+// in the background can sit inside a stale backoff long after the network is back.
+// Force a check the moment it is looked at again, and the moment the OS says online.
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && HW.client && !HW.client.connected) HW.client.reconnect();
+});
+window.addEventListener('online', () => {
+    if (HW.client && !HW.client.connected) HW.client.reconnect();
+});
+
+// Freshness is re-evaluated independently of packet arrival — that is the whole
+// point, since the failure being detected is packets NOT arriving.
+setInterval(applyFreshnessToUI, 500);
 
 // ── Cleanly disconnect ─────────────────────────────────────────────────────────
 function disconnectMQTT() {
     if (HW.client) { HW.client.end(true); HW.client = null; }
     HW.connected = false;
     HW.running = false;
+            HW.intentRunning = false;  // stop feeding the firmware deadman
     HW.lastProxState = false;
     SIM.rpm = 0;
     SIM.targetRpm = 0;
@@ -1120,7 +1281,12 @@ async function breakerOff({ estopFirst = false, label = 'panel' } = {}) {
     const key = window.prompt('Enter the breaker passphrase to confirm power cut:');
     if (!key) { addLog('[NB2] Breaker OFF cancelled — no passphrase.', 'info'); return; }
     if (estopFirst) {
+        HW.intentRunning = false;   // drop the deadman feed first
+        // Repeat the stop three times. It is idempotent, and losing it is far
+        // worse than sending it twice.
         sendCmdObject({ cmd: 'estop' });
+        setTimeout(() => { if (HW.connected) HW.client.publish(MQTT_CFG.topicCmd, JSON.stringify({ cmd: 'estop' }), { qos: 1 }); }, 250);
+        setTimeout(() => { if (HW.connected) HW.client.publish(MQTT_CFG.topicCmd, JSON.stringify({ cmd: 'estop' }), { qos: 1 }); }, 600);
         await new Promise(r => setTimeout(r, 200));
     }
     sendCmdObject({ breaker: 'off', key });
@@ -1666,17 +1832,18 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
         // Simulation tab: SIM.rpm (user-sandbox, isolated from model tab).
         // Other tabs:  model is frozen (canvas hidden anyway).
         let active3dRpm = 0;
-        const mqttAge = MQTT_STATE.lastPacketTime > 0
-            ? Date.now() - MQTT_STATE.lastPacketTime
-            : Infinity;
+        // Monotonic age — immune to OS clock steps and to the jump a laptop takes
+        // across sleep, both of which made the old Date.now() age meaningless.
+        const mqttAge = telemetryAgeMs();
+        const fresh = freshnessState();
 
         if (currentActiveTab === 'model') {
             if (HW.connected) {
-                if (MQTT_STATE.lastPacketTime > 0 && mqttAge > 12000) {
-                    // Stale data: stream dropped mid-session — freeze model (12 s tolerance for 5 s telemetry)
+                if (!dataUsable()) {
+                    // Stale: the stream dropped mid-session. Freeze — never extrapolate.
                     if (!MQTT_STATE.isStale) {
                         MQTT_STATE.isStale = true;
-                        addLog('⚠ MQTT stream stale (>12 s) — 3D replica frozen. Check ESP32.', 'warning');
+                        addLog(`⚠ Telemetry stale (>${(DELAYED_MS / 1000).toFixed(0)} s) — 3D replica frozen. Check bridge/ESP32.`, 'warning');
                     }
                     active3dRpm = 0;
                 } else {
@@ -1700,7 +1867,7 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                     freshnessEl.style.width = '0%';
                     freshnessEl.style.background = 'var(--border-subtle)';
                 } else {
-                    const freshPct = Math.max(0, 1 - mqttAge / 10000) * 100;
+                    const freshPct = Math.max(0, 1 - mqttAge / DELAYED_MS) * 100;
                     freshnessEl.style.width = freshPct + '%';
                     freshnessEl.style.background =
                         freshPct > 50 ? 'var(--status-ok)' :
@@ -1718,20 +1885,26 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                         ? `${Math.round(mqttAge)} ms ago`
                         : `${(mqttAge / 1000).toFixed(1)} s ago`;
             }
-            // Sensor-noise tolerance for display only — never applied to a true 0
+            // Sensor-noise tolerance for display realism — never applied to a true 0
             // (stop command / motor idle), so STOP always reads exactly 0.
-            // Refreshed only every 3s (see REPLICA_HUD_REFRESH_MS below) so the
-            // readout doesn't flicker every render frame.
+            // Refreshed only every 3s (REPLICA_HUD_REFRESH_MS) so the readout doesn't
+            // flicker every render frame.
             const applyTolerance = (value, pct) =>
                 value === 0 ? 0 : value * (1 + (Math.random() * 2 - 1) * pct / 100);
 
             const now = Date.now();
             if (now - lastReplicaHudUpdate >= REPLICA_HUD_REFRESH_MS) {
                 lastReplicaHudUpdate = now;
+                // Gated on freshness: when the feed is stale the readouts show '—'
+                // rather than jittering a dead value, so tolerance only ever varies
+                // numbers that are actually being updated.
+                const usable = HW.connected && dataUsable();
                 const replicaRpm = document.getElementById('model-replica-rpm');
-                if (replicaRpm) replicaRpm.textContent = HW.connected ? applyTolerance(MQTT_STATE.rpm, 5).toFixed(1) : '—';
+                if (replicaRpm) replicaRpm.textContent = usable
+                    ? applyTolerance(MQTT_STATE.rpm, 5).toFixed(1) : '—';
                 const replicaSpeed = document.getElementById('model-replica-speed');
-                if (replicaSpeed) replicaSpeed.textContent = HW.connected ? applyTolerance(MQTT_STATE.beltSpeed, 2).toFixed(3) : '—';
+                if (replicaSpeed) replicaSpeed.textContent = usable
+                    ? applyTolerance(MQTT_STATE.beltSpeed, 2).toFixed(3) : '—';
             }
             const replicaProx = document.getElementById('model-replica-prox');
             if (replicaProx) {
@@ -2107,6 +2280,7 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
             // cannot restart the belt without an explicit operator action.
             sendCmdObject({ cmd: 'stop' });
             HW.running = false;
+            HW.intentRunning = false;  // stop feeding the firmware deadman
             if (UI.status) UI.status.textContent = 'Hardware Mode';
             addLog('[HW] Motor stop command sent (gradual stop completed).', 'info');
         } else {
@@ -2133,11 +2307,15 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                 // The firmware boots in MANUAL mode and blocks motor commands until
                 // it receives {"mode":"remote"}. Always send the mode switch first.
                 const speedPct = Math.min(100, Math.round((SIM.targetRpm / SIM.maxRpm) * 100));
-                sendCmdObject({ mode: 'remote' });
-                setTimeout(() => {
-                    sendCmdObject({ cmd: 'start', dir: 'fwd', speed: speedPct });
-                }, 80); // small delay so firmware processes mode switch before motor cmd
+                // Single atomic message. The firmware parses "mode" before it evaluates
+                // cmd/dir in the same packet, so this arms REMOTE and starts in one go.
+                // Previously these were two separate publishes raced by an 80 ms timer:
+                // if the mode message was lost or arrived late the start was rejected
+                // ("Motor cmd REJECTED - MANUAL mode active") while the UI still logged
+                // success. One message cannot be half-delivered.
+                sendCmdObject({ mode: 'remote', cmd: 'start', dir: 'fwd', speed: speedPct });
                 HW.running = true;
+                HW.intentRunning = true;
                 if (UI.status) UI.status.textContent = 'Hardware Mode';
                 addLog(`[HW] Motor engaged — Forward ${speedPct}% PWM (setpoint: ${SIM.targetRpm} RPM).`, 'success');
             } else {
@@ -2167,10 +2345,12 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                     completeStop();
                 } else {
                     SIM.targetRpm = rampRpm;
-                    if (HW.connected) {
-                        const speedPct = Math.min(100, Math.round((rampRpm / SIM.maxRpm) * 100));
-                        sendCmdObject({ cmd: "start", dir: "fwd", speed: speedPct });
-                    }
+                    // NOTE: this loop used to publish {cmd:"start"} every 200 ms in order
+                    // to DECELERATE — five start commands per second, which is free-tier
+                    // rate-limit bait and unreadable in a command log. The firmware already
+                    // ramps down on its own via gradualMotorControl(), so the single
+                    // {cmd:'stop'} issued by completeStop() is sufficient. The ramp below
+                    // is now display-only and sends nothing to the machine.
                 }
             }, 200); // 200ms step interval for smooth ramp
         });
@@ -2202,12 +2382,28 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
     let walkSettleTimer = null;
     let activeWalkPreset = null;
 
-    // Send a heartbeat every 1.5s to keep the ESP32 watchdog from force-stopping the motor
+    // Heartbeat feeding the firmware's REMOTE_COMMAND_TIMEOUT_MS deadman (3 s).
+    //
+    // At 1.5 s the margin was only two beats: lose two in a row — a Wi-Fi blip, a
+    // broker hiccup, a background-tab throttle — and the firmware force-stops the
+    // motor AND reverts to MANUAL, which is why a start would run briefly, die, and
+    // then work on the second click (the retry re-arms REMOTE first).
+    //
+    // 700 ms gives ~4 beats of margin, and QoS 1 means each one is acknowledged.
+    // This is a mitigation, not the fix: the deadman belongs on the bridge, which
+    // sits on the local USB link rather than across the public internet. See Wave C.
+    //
+    // Gated on HW.intentRunning (operator intent) rather than SIM.isRunning.
+    // SIM.isRunning is overwritten by every telemetry packet, so a single packet
+    // reporting speed_percent 0 — exactly what arrives right after the deadman
+    // fires — used to stop the heartbeat permanently, guaranteeing the motor could
+    // never recover. Intent is only cleared by Stop or E-Stop.
+    const HEARTBEAT_MS = 700;
     setInterval(() => {
-        if (HW.connected && SIM.isRunning) {
+        if (HW.connected && HW.intentRunning) {
             sendCmdObject({ mode: 'remote' });
         }
-    }, 1500);
+    }, HEARTBEAT_MS);
 
     function activateWalkPreset(preset) {
         if (!HW.connected) return;
@@ -2220,11 +2416,13 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
         if (map[preset]) map[preset].classList.add('prog-active');
         activeWalkPreset = preset;
 
-        // Arm the motor in REMOTE mode then send walk command
-        sendCmdObject({ mode: 'remote' });
-        setTimeout(() => sendCmdObject({ walk: preset }), 80);
+        // Arm REMOTE and select the preset in one atomic message — the firmware
+        // handles "mode" before "walk" within the same packet, so the previous
+        // two-publish + 80 ms race is unnecessary and could drop the arm.
+        sendCmdObject({ mode: 'remote', walk: preset });
 
         HW.lastCommandTime = Date.now();
+        HW.intentRunning = true;
         SIM.isRunning = true;
         if (UI.statusPill) UI.statusPill.classList.add('active');
         if (UI.status) UI.status.textContent = 'Hardware Mode';
@@ -2249,6 +2447,7 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
         if (HW.connected) {
             sendCmdObject({ cmd: 'stop' });
             HW.running = false;
+            HW.intentRunning = false;  // stop feeding the firmware deadman
         }
 
         SIM.isRunning = false;
@@ -2646,3 +2845,441 @@ if (camPanRight) {
         }
     });
 }
+
+
+// ============================================================================
+// PLATFORM RELIABILITY MODULE
+// Command confirmation, watchdog detection, local recording, broker failover,
+// connection health, camera recovery. All client-side — no backend required.
+// ============================================================================
+const DTX = {
+    // Command tracking
+    pending: new Map(),          // cmdId -> {action, expect, sentAt, timer}
+    lastCommand: null,           // {id, action, state, reason, latencyMs}
+    CONFIRM_TIMEOUT_MS: 12000,   // must span >= 2 telemetry packets at 5-8 s cadence
+
+    // Health counters
+    health: {
+        sessionStart: Date.now(),
+        reconnects: 0,
+        packets: 0,
+        gaps: [],                // recent inter-packet gaps (ms), ring of 200
+        lastPacketAt: 0,
+        cmdSent: 0, cmdConfirmed: 0, cmdFailed: 0,
+        brokerSwitches: 0,
+        camRestarts: 0,
+        lastMode: null,
+        watchdogReverts: 0,
+    },
+
+    // Recorder
+    db: null,
+    RETAIN_MS: 24 * 60 * 60 * 1000,
+    recordQueue: [],
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 1. COMMAND CONFIRMATION FROM TELEMETRY
+    // The firmware sends no acknowledgement, but its telemetry already reports
+    // speed_percent / target_speed_percent / dir / control_mode. If a command
+    // was truly executed those fields must change to match it. Watching them is
+    // an execution check that needs no firmware change.
+    // ═══════════════════════════════════════════════════════════════════════
+    expectationFor(cmd) {
+        const WALK = { slow: 30, medium: 60, fast: 100 };
+        if (cmd.walk !== undefined)
+            return { label: 'walk ' + cmd.walk, test: d => d.target_speed_percent === WALK[cmd.walk] };
+        if (cmd.cmd === 'stop' || cmd.cmd === 'estop')
+            return { label: 'stop', test: d => (d.target_speed_percent | 0) === 0 };
+        if (cmd.cmd === 'start' || cmd.dir === 'fwd') {
+            const want = cmd.speed | 0;
+            return { label: 'start ' + want + '%', test: d => Math.abs((d.target_speed_percent | 0) - want) <= 2 };
+        }
+        if (cmd.breaker !== undefined)
+            return { label: 'breaker ' + cmd.breaker, test: d => !!(d.nb2 && d.nb2.breaker_on) === (cmd.breaker === 'on') };
+        return null;   // heartbeats and mode-only messages are not tracked
+    },
+
+    track(cmd) {
+        const expect = this.expectationFor(cmd);
+        if (!expect) return;                       // don't track heartbeats
+        const id = 'c-' + Math.random().toString(16).slice(2, 8);
+        this.health.cmdSent++;
+        const rec = { id, action: expect.label, expect, sentAt: Date.now() };
+        rec.timer = setTimeout(() => this.resolve(id, 'FAILED', 'not reflected in telemetry'), this.CONFIRM_TIMEOUT_MS);
+        this.pending.set(id, rec);
+        this.lastCommand = { id, action: expect.label, state: 'PENDING', sentAt: rec.sentAt };
+        this.renderCommandStrip();
+        this.record('command', { id, action: expect.label, state: 'PENDING', payload: JSON.stringify(cmd) });
+    },
+
+    resolve(id, state, reason) {
+        const rec = this.pending.get(id);
+        if (!rec) return;
+        clearTimeout(rec.timer);
+        this.pending.delete(id);
+        const latencyMs = Date.now() - rec.sentAt;
+        if (state === 'CONFIRMED') this.health.cmdConfirmed++; else this.health.cmdFailed++;
+        this.lastCommand = { id, action: rec.action, state, reason, latencyMs };
+        this.renderCommandStrip();
+        this.record('command', { id, action: rec.action, state, reason: reason || '', latencyMs });
+        addLog(state === 'CONFIRMED'
+            ? '[CMD OK] ' + rec.action + ' confirmed by telemetry in ' + (latencyMs / 1000).toFixed(1) + ' s.'
+            : '[CMD FAIL] ' + rec.action + ' NOT CONFIRMED - ' + reason + '.',
+            state === 'CONFIRMED' ? 'success' : 'error');
+    },
+
+    checkPending(d) {
+        for (const [id, rec] of [...this.pending])
+            if (rec.expect.test(d)) this.resolve(id, 'CONFIRMED');
+    },
+
+    renderCommandStrip() {
+        const el = document.getElementById('cmd-status-strip');
+        if (!el) return;
+        const c = this.lastCommand;
+        if (!c) { el.classList.add('hidden'); return; }
+        el.classList.remove('hidden');
+        const cls = { PENDING: 'is-pending', CONFIRMED: 'is-ok', FAILED: 'is-fail' }[c.state];
+        el.className = 'cmd-status-strip ' + cls;
+        el.textContent = c.state === 'PENDING'
+            ? c.action + ' - awaiting confirmation...'
+            : c.state === 'CONFIRMED'
+                ? c.action + ' - confirmed (' + (c.latencyMs / 1000).toFixed(1) + ' s)'
+                : c.action + ' - NOT CONFIRMED (' + c.reason + ')';
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 2. WATCHDOG-REVERT DETECTOR
+    // The firmware's remote-command deadman force-stops the motor AND drops
+    // control_mode back to "manual". That transition is visible in telemetry,
+    // so the belt dying for "no reason" can be named the moment it happens.
+    // ═══════════════════════════════════════════════════════════════════════
+    checkWatchdogRevert(d) {
+        const mode = (d.control_mode || '').toLowerCase();
+        const prev = this.health.lastMode;
+        this.health.lastMode = mode;
+        if (prev === 'remote' && mode === 'manual') {
+            this.health.watchdogReverts++;
+            const intended = HW.intentRunning;
+            addLog(intended
+                ? 'DEVICE DISARMED ITSELF - control_mode reverted remote->manual while running. '
+                + 'This is the firmware remote-command deadman: no command reached the ESP32 within its '
+                + 'timeout, so the motor was force-stopped.'
+                : 'Device control_mode changed remote->manual.',
+                intended ? 'error' : 'info');
+            this.record('event', { event: 'watchdog_revert', intended: !!intended, mode_from: prev, mode_to: mode });
+            const el = document.getElementById('watchdog-alert');
+            if (el && intended) {
+                el.classList.remove('hidden');
+                el.textContent = 'DEADMAN FIRED at ' + new Date().toLocaleTimeString()
+                    + ' - device reverted to MANUAL and stopped the motor. (click to dismiss)';
+            }
+        }
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 3. BROWSER-SIDE RECORDER (IndexedDB, ~24 h ring, CSV/JSON export)
+    // Stands in for the absent server-side database: a timestamped record of
+    // telemetry, commands and events that survives reloads and can be exported.
+    // ═══════════════════════════════════════════════════════════════════════
+    initDB() {
+        try {
+            const req = indexedDB.open('dt_twin_log', 1);
+            req.onupgradeneeded = e => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains('rows')) {
+                    const s = db.createObjectStore('rows', { keyPath: 'k', autoIncrement: true });
+                    s.createIndex('ts', 'ts');
+                    s.createIndex('kind', 'kind');
+                }
+            };
+            req.onsuccess = e => { this.db = e.target.result; this.flushQueue(); this.prune(); };
+            req.onerror = () => addLog('Local recorder unavailable (IndexedDB blocked).', 'warning');
+        } catch (e) { /* private mode / storage disabled - recorder stays off */ }
+    },
+
+    record(kind, obj) {
+        // kind/ts are assigned LAST so a payload field can never clobber them.
+        const row = Object.assign({}, obj, { kind, ts: Date.now() });
+        if (!this.db) { if (this.recordQueue.length < 500) this.recordQueue.push(row); return; }
+        try {
+            this.db.transaction('rows', 'readwrite').objectStore('rows').add(row);
+        } catch (e) { /* ignore a single failed write */ }
+    },
+
+    flushQueue() {
+        if (!this.db || !this.recordQueue.length) return;
+        try {
+            const st = this.db.transaction('rows', 'readwrite').objectStore('rows');
+            this.recordQueue.forEach(r => st.add(r));
+            this.recordQueue = [];
+        } catch (e) { /* ignore */ }
+    },
+
+    prune() {
+        if (!this.db) return;
+        try {
+            const cutoff = Date.now() - this.RETAIN_MS;
+            const st = this.db.transaction('rows', 'readwrite').objectStore('rows');
+            st.index('ts').openCursor(IDBKeyRange.upperBound(cutoff)).onsuccess = e => {
+                const cur = e.target.result;
+                if (cur) { cur.delete(); cur.continue(); }
+            };
+        } catch (e) { /* ignore */ }
+    },
+
+    exportLog(format) {
+        if (!this.db) { addLog('Nothing recorded yet.', 'warning'); return; }
+        const tx = this.db.transaction('rows', 'readonly').objectStore('rows').getAll();
+        tx.onsuccess = () => {
+            const rows = tx.result || [];
+            if (!rows.length) { addLog('Recorder is empty.', 'warning'); return; }
+            let blob, name;
+            if (format === 'json') {
+                blob = new Blob([JSON.stringify(rows, null, 1)], { type: 'application/json' });
+                name = 'dt_log.json';
+            } else {
+                const cols = [...rows.reduce((s, r) => { Object.keys(r).forEach(k => s.add(k)); return s; }, new Set())];
+                const esc = v => (v === undefined || v === null) ? ''
+                    : /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+                const csv = [cols.join(',')].concat(
+                    rows.map(r => cols.map(c => esc(c === 'ts' ? new Date(r.ts).toISOString() : r[c])).join(','))
+                ).join('\n');
+                blob = new Blob([csv], { type: 'text/csv' });
+                name = 'dt_log.csv';
+            }
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob); a.download = name; a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+            addLog('Exported ' + rows.length + ' recorded rows to ' + name, 'success');
+        };
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 4. BROKER AUTO-FAILOVER
+    // Three profiles are configured but selection was manual, so one degraded
+    // broker meant a dead dashboard. If the active profile connects but delivers
+    // no telemetry, roll to the next one.
+    // ═══════════════════════════════════════════════════════════════════════
+    failoverTimer: null,
+    FAILOVER_SILENCE_MS: 25000,
+    tried: new Set(),
+
+    armFailover() {
+        clearTimeout(this.failoverTimer);
+        this.failoverTimer = setTimeout(() => {
+            if (!HW.connected) return;
+            if (telemetryAgeMs() < this.FAILOVER_SILENCE_MS) { this.armFailover(); return; }
+            const sel = document.getElementById('select-broker-profile');
+            if (!sel) return;
+            const opts = [...sel.options].map(o => o.value);
+            this.tried.add(sel.value);
+            const next = opts.find(v => !this.tried.has(v));
+            if (!next) {
+                this.tried.clear();
+                addLog('All broker profiles silent - staying on the current one.', 'warning');
+                this.armFailover();
+                return;
+            }
+            this.health.brokerSwitches++;
+            addLog('No telemetry for ' + (this.FAILOVER_SILENCE_MS / 1000) + ' s on "' + sel.value
+                + '" - failing over to "' + next + '".', 'warning');
+            this.record('event', { event: 'broker_failover', from: sel.value, to: next });
+            sel.value = next;
+            disconnectMQTT();
+            setTimeout(connectMQTT, 400);
+        }, this.FAILOVER_SILENCE_MS);
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 5. CONNECTION HEALTH
+    // ═══════════════════════════════════════════════════════════════════════
+    notePacket() {
+        const now = Date.now();
+        if (this.health.lastPacketAt) {
+            this.health.gaps.push(now - this.health.lastPacketAt);
+            if (this.health.gaps.length > 200) this.health.gaps.shift();
+        }
+        this.health.lastPacketAt = now;
+        this.health.packets++;
+    },
+
+    renderHealth() {
+        const el = document.getElementById('health-panel-body');
+        if (!el) return;
+        const h = this.health;
+        const g = [...h.gaps].sort((a, b) => a - b);
+        const p50 = g.length ? g[Math.floor(g.length / 2)] : 0;
+        const max = g.length ? g[g.length - 1] : 0;
+        const rate = h.cmdSent ? Math.round((h.cmdConfirmed / h.cmdSent) * 100) : null;
+        const row = (k, v, warn) =>
+            '<div class="hp-row"><span class="hp-k">' + k + '</span><span class="hp-v'
+            + (warn ? ' hp-warn' : '') + '">' + v + '</span></div>';
+        el.innerHTML =
+            row('Link', freshnessState(), freshnessState() !== 'FRESH') +
+            row('Last packet', ageLabel(), !dataUsable()) +
+            row('Packets', h.packets) +
+            row('Gap p50 / max', g.length ? (p50 / 1000).toFixed(1) + ' / ' + (max / 1000).toFixed(1) + ' s' : '--', max > DELAYED_MS) +
+            row('Reconnects', h.reconnects, h.reconnects > 0) +
+            row('Broker switches', h.brokerSwitches, h.brokerSwitches > 0) +
+            row('Commands', h.cmdConfirmed + '/' + h.cmdSent + ' confirmed', h.cmdFailed > 0) +
+            row('Command success', rate === null ? '--' : rate + '%', rate !== null && rate < 95) +
+            row('Deadman events', h.watchdogReverts, h.watchdogReverts > 0) +
+            row('Camera restarts', h.camRestarts) +
+            row('Session', ((Date.now() - h.sessionStart) / 60000).toFixed(1) + ' min');
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 6. CAMERA RECOVERY + MANUAL RESTART
+    // The feed is a cross-origin iframe, so its internals cannot be inspected;
+    // reachability is probed separately and the frame is reloaded on demand.
+    // ═══════════════════════════════════════════════════════════════════════
+    camBaseSrc: null,
+    camLastOk: 0,
+    camFailStreak: 0,
+    camProbeEverOk: false,          // has this probe EVER succeeded here?
+    camLastAutoRestart: 0,
+    CAM_FAIL_LIMIT: 3,              // consecutive failures before acting
+    CAM_AUTORESTART_COOLDOWN_MS: 300000,
+
+    restartCamera(manual) {
+        const f = document.getElementById('cam-feed-iframe');
+        if (!f) return;
+        if (!this.camBaseSrc) this.camBaseSrc = f.src.split('&_r=')[0].split('?_r=')[0];
+        const sep = this.camBaseSrc.indexOf('?') !== -1 ? '&' : '?';
+        this.health.camRestarts++;
+        this.setCamStatus('Restarting...', 'warn');
+        f.src = this.camBaseSrc + sep + '_r=' + Date.now();
+        addLog(manual ? 'Camera feed restart requested by operator.'
+            : 'Camera feed unreachable - auto-restarting.', 'warning');
+        this.record('event', { event: 'camera_restart', manual: !!manual });
+        this.camFailStreak = 0;
+        if (manual) this.camLastAutoRestart = Date.now();
+        setTimeout(() => this.probeCamera(), 3000);
+    },
+
+    setCamStatus(text, kind) {
+        const el = document.getElementById('cam-status-text');
+        if (!el) return;
+        if (!text) { el.style.display = 'none'; return; }
+        el.style.display = '';
+        el.textContent = text;
+        el.style.color = kind === 'bad' ? 'var(--status-crit)'
+            : kind === 'warn' ? 'var(--status-warn)' : 'var(--status-ok)';
+    },
+
+    // Liveness probe. An earlier version used fetch(..., {mode:'no-cors'}) and
+    // treated any rejection as "camera down" — that fired a false restart on live
+    // hardware, because such a fetch can fail for reasons unrelated to the camera.
+    // Three guards now stand between a probe failure and any action:
+    //   1. it asks for an actual JPEG frame, so success means frames are flowing;
+    //   2. an <img> load is not subject to CORS, so the result is meaningful;
+    //   3. nothing is ever inferred unless the probe has succeeded at least once
+    //      in this environment, so an unsupported endpoint stays silent forever.
+    probeCamera() {
+        const f = document.getElementById('cam-feed-iframe');
+        if (!f || !f.src) return;
+        let origin, srcName;
+        try {
+            const u = new URL(f.src);
+            origin = u.origin;
+            srcName = u.searchParams.get('src') || 'pi_cam';
+        } catch (e) { return; }
+
+        const img = new Image();
+        let settled = false;
+        const finish = ok => {
+            if (settled) return;
+            settled = true;
+            img.onload = img.onerror = null;
+            if (ok) {
+                this.camProbeEverOk = true;
+                this.camFailStreak = 0;
+                this.camLastOk = Date.now();
+                this.setCamStatus('', 'ok');
+                return;
+            }
+            // Probe never worked here => it is not a usable signal. Stay quiet.
+            if (!this.camProbeEverOk) { this.setCamStatus('', 'ok'); return; }
+            this.camFailStreak++;
+            if (this.camFailStreak < this.CAM_FAIL_LIMIT) {
+                this.setCamStatus('Feed check failed', 'warn');
+                return;
+            }
+            this.setCamStatus('Feed not responding', 'bad');
+            if (Date.now() - this.camLastAutoRestart > this.CAM_AUTORESTART_COOLDOWN_MS) {
+                this.camLastAutoRestart = Date.now();
+                this.restartCamera(false);
+            }
+        };
+        img.onload = () => finish(true);
+        img.onerror = () => finish(false);
+        setTimeout(() => finish(false), 6000);
+        img.src = origin + '/api/frame.jpeg?src=' + encodeURIComponent(srcName) + '&_=' + Date.now();
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 7. CONTROL GATING - never let a command be fired into a dead socket
+    // ═══════════════════════════════════════════════════════════════════════
+    updateControlsEnabled() {
+        const ok = HW.connected;
+        [UI.btnRun, UI.btnStop, UI.btnWalkSlow, UI.btnWalkMedium, UI.btnWalkFast, UI.btnSetRpm]
+            .forEach(b => {
+                if (!b) return;
+                b.disabled = !ok;
+                b.title = ok ? '' : 'Hardware not connected';
+            });
+    },
+
+    // Telemetry entry point
+    onTelemetry(d) {
+        this.notePacket();
+        this.checkWatchdogRevert(d);
+        this.checkPending(d);
+        this.armFailover();
+        this.record('telemetry', {
+            rpm: d.rpm, pwm: d.speed_percent, target: d.target_speed_percent,
+            dir: d.dir, mode: d.control_mode, prox: d.e18_active ? 1 : 0,
+            temp: d.temp_c, up: d.uptime_ms,
+            v: d.nb2 && d.nb2.voltage, a: d.nb2 && d.nb2.current,
+            w: d.nb2 && d.nb2.active_power,
+            brk: d.nb2 && d.nb2.breaker_on ? 1 : 0,
+            rs485: d.nb2 && d.nb2.rs485_ok ? 1 : 0,
+            fault: d.nb2 && d.nb2.fault_flags,
+        });
+    },
+
+    init() {
+        this.initDB();
+        setInterval(() => this.renderHealth(), 1000);
+        setInterval(() => this.probeCamera(), 15000);
+        setInterval(() => this.prune(), 10 * 60 * 1000);
+        setTimeout(() => this.probeCamera(), 2000);
+
+        const bind = (id, fn) => { const e = document.getElementById(id); if (e) e.addEventListener('click', fn); };
+        bind('btn-cam-restart', () => this.restartCamera(true));
+        bind('btn-export-csv', () => this.exportLog('csv'));
+        bind('btn-export-json', () => this.exportLog('json'));
+        bind('watchdog-alert', () => document.getElementById('watchdog-alert').classList.add('hidden'));
+
+        this.updateControlsEnabled();
+        setInterval(() => this.updateControlsEnabled(), 1000);
+
+        // 8. 3D scene readiness. The scene needs roughly a minute of shader
+        // compilation for 47 PBR materials, during which the twin is frozen with
+        // no explanation - which reads as a broken dashboard.
+        const ov = document.getElementById('scene-loading');
+        if (ov) {
+            const check = setInterval(() => {
+                const eng = window.BABYLON && BABYLON.Engine.Instances[0];
+                const sc = eng && eng.scenes[0];
+                if (sc && sc.isReady()) { ov.classList.add('hidden'); clearInterval(check); }
+            }, 500);
+            setTimeout(() => { ov.classList.add('hidden'); clearInterval(check); }, 180000);
+        }
+    },
+};
+
+if (document.readyState === 'loading')
+    document.addEventListener('DOMContentLoaded', () => DTX.init());
+else DTX.init();

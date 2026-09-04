@@ -2418,3 +2418,191 @@ model-viewer {
   border-radius: 50%;
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TELEMETRY FRESHNESS & PROVENANCE
+   Added with Wave A. The rule these implement: a value that is not a fresh
+   measurement must never look like one. Nothing here invents motion, colour or
+   variation — it only qualifies what is already on screen.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.telemetry-age-badge {
+    display: block;
+    margin: 6px 0 2px;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    border: 1px solid transparent;
+}
+.telemetry-age-badge.is-delayed {
+    color: var(--status-warn, #f59e0b);
+    background: color-mix(in srgb, var(--status-warn, #f59e0b) 12%, transparent);
+    border-color: color-mix(in srgb, var(--status-warn, #f59e0b) 35%, transparent);
+}
+.telemetry-age-badge.is-stale {
+    color: var(--status-crit, #ef4444);
+    background: color-mix(in srgb, var(--status-crit, #ef4444) 12%, transparent);
+    border-color: color-mix(in srgb, var(--status-crit, #ef4444) 40%, transparent);
+}
+
+/* Whole-page staleness. Values stay readable but visibly lose authority, so a
+   frozen dashboard cannot be mistaken for a live one. */
+body[data-freshness="DELAYED"] .tele-val { opacity: .72; }
+body[data-freshness="STALE_DATA"] .tele-val,
+body[data-freshness="DISCONNECTED"] .tele-val {
+    opacity: .45;
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PLATFORM RELIABILITY UI
+   Command confirmation strip, deadman alert, connection health, camera
+   restart control, 3D scene loading state.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Last command, confirmed against telemetry rather than assumed */
+.cmd-status-strip {
+    display: block;
+    margin: 4px 0 2px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: .03em;
+    border: 1px solid transparent;
+}
+.cmd-status-strip.is-pending {
+    color: var(--status-warn, #b45309);
+    background: color-mix(in srgb, var(--status-warn, #f59e0b) 10%, transparent);
+    border-color: color-mix(in srgb, var(--status-warn, #f59e0b) 32%, transparent);
+}
+.cmd-status-strip.is-ok {
+    color: var(--status-ok, #15803d);
+    background: color-mix(in srgb, var(--status-ok, #22c55e) 10%, transparent);
+    border-color: color-mix(in srgb, var(--status-ok, #22c55e) 32%, transparent);
+}
+.cmd-status-strip.is-fail {
+    color: var(--status-crit, #b91c1c);
+    background: color-mix(in srgb, var(--status-crit, #ef4444) 12%, transparent);
+    border-color: color-mix(in srgb, var(--status-crit, #ef4444) 40%, transparent);
+}
+
+/* Device dropped itself out of REMOTE — the deadman fired */
+.watchdog-alert {
+    display: block;
+    margin: 4px 0 2px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .03em;
+    cursor: pointer;
+    color: #fff;
+    background: var(--status-crit, #ef4444);
+    border: 1px solid color-mix(in srgb, #000 18%, var(--status-crit, #ef4444));
+}
+.watchdog-alert:hover { filter: brightness(1.06); }
+
+/* Connection health readout */
+.health-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 4px 0 2px;
+}
+.hp-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding: 4px 2px;
+    border-bottom: 1px solid var(--border-subtle, rgba(120,140,155,.16));
+}
+.hp-row:last-child { border-bottom: 0; }
+.hp-k {
+    font-size: 11px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--text-muted, #7b8b95);
+}
+.hp-v {
+    font-size: 12.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary, #10161a);
+}
+.hp-v.hp-warn { color: var(--status-warn, #b45309); }
+.health-foot {
+    font-size: 10.5px;
+    color: var(--text-muted, #7b8b95);
+    padding: 6px 2px 2px;
+    border-top: 1px solid var(--border-subtle, rgba(120,140,155,.16));
+}
+
+/* Camera restart / export buttons */
+.cam-restart-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 8px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    background: var(--surface, #fff);
+    color: var(--text-muted, #7b8b95);
+    border: 1px solid var(--border, rgba(120,140,155,.3));
+    border-radius: var(--radius-sm, 4px);
+    cursor: pointer;
+    transition: color .15s, border-color .15s, background .15s;
+}
+.cam-restart-btn:hover {
+    color: var(--accent, #0284c7);
+    border-color: var(--accent, #0284c7);
+    background: color-mix(in srgb, var(--accent, #0284c7) 8%, transparent);
+}
+.cam-restart-btn:active { transform: translateY(1px); }
+.cam-restart-btn:focus-visible { outline: 2px solid var(--accent, #0284c7); outline-offset: 2px; }
+
+/* 3D scene loading state */
+.scene-loading {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--bg, #0f172a) 82%, transparent);
+    backdrop-filter: blur(2px);
+    pointer-events: none;
+}
+.scene-loading.hidden { display: none; }
+.scene-loading-inner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    border-radius: 8px;
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, rgba(120,140,155,.3));
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: .03em;
+    color: var(--text-primary, #10161a);
+    box-shadow: 0 8px 28px -12px rgba(0,0,0,.45);
+}
+.scene-spinner {
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, var(--accent, #0284c7) 28%, transparent);
+    border-top-color: var(--accent, #0284c7);
+    animation: scene-spin .8s linear infinite;
+}
+@keyframes scene-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .scene-spinner { animation: none; } }

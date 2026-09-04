@@ -25,6 +25,14 @@
 
     <!-- ── FULL SCREEN 3D CANVAS (shared, shown only on model/sim tabs) ── -->
     <canvas id="canvas3d" class="hidden"></canvas>
+    <!-- Shown until Babylon reports the scene ready; shader compilation for the
+         PBR materials takes a while and the twin sits frozen until it finishes. -->
+    <div id="scene-loading" class="scene-loading">
+        <div class="scene-loading-inner">
+            <div class="scene-spinner"></div>
+            <span>Preparing 3D scene — compiling materials…</span>
+        </div>
+    </div>
 
     <!-- ── TOP APPLICATION HEADER ─────────────────────────────────────── -->
     <header class="topbar">
@@ -226,6 +234,10 @@
                                         <span class="cam-overlay-status" id="cam-status-text" style="display:none;">Unavailable</span>
                                     </div>
                                     <div style="display: flex; gap: 6px; margin-left: auto; align-items: center;">
+                                        <button class="cam-restart-btn" id="btn-cam-restart" title="Restart the live feed (reloads the stream)">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                                            <span>Restart</span>
+                                        </button>
                                         <button class="log-toggle" id="btn-camfeed-toggle" title="Hide Camera Feed" style="width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-muted); cursor:pointer;">
                                             <svg id="camfeed-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none"
                                                 xmlns="http://www.w3.org/2000/svg">
@@ -299,6 +311,14 @@
                             <span id="replica-stale-warning" class="hidden"
                                 style="font-size:12px;color:var(--warning);">MQTT stale — model frozen</span>
                         </div>
+                        <!-- Connection freshness indicator: appears only when the feed
+                             is late or dropped, so a frozen dashboard is distinguishable
+                             from a live one. -->
+                        <div id="telemetry-age-badge" class="telemetry-age-badge hidden"></div>
+                        <!-- Last command, confirmed against telemetry rather than assumed -->
+                        <div id="cmd-status-strip" class="cmd-status-strip hidden"></div>
+                        <!-- Raised when the device drops itself out of REMOTE mode -->
+                        <div id="watchdog-alert" class="watchdog-alert hidden"></div>
                         <div class="tele-strip">
                             <div class="tele-item">
                                 <span class="tele-label">Motor RPM</span>
@@ -351,6 +371,20 @@
                             </div>
                         </div>
 
+                    </div>
+
+                    <!-- Connection health + local recorder. Everything here is derived
+                         from data already arriving; no backend involved. -->
+                    <div class="model-card" style="margin-top:12px;margin-bottom:0;">
+                        <div class="model-hdr">
+                            <span class="model-title-text" style="font-size:14px;">Connection Health</span>
+                            <div style="display:flex;gap:6px;margin-left:auto;">
+                                <button id="btn-export-csv" class="cam-restart-btn" title="Export the recorded log as CSV">CSV</button>
+                                <button id="btn-export-json" class="cam-restart-btn" title="Export the recorded log as JSON">JSON</button>
+                            </div>
+                        </div>
+                        <div id="health-panel-body" class="health-panel"></div>
+                        <div class="health-foot">Telemetry, commands and events are recorded locally for 24 h.</div>
                     </div>
                 </div>
 
