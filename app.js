@@ -154,6 +154,8 @@ const STALE_MS   = 25000;  // >  DELAYED: STALE (twin frozen, values struck thro
 const MQTT_STATE = {
     rpm: 0,           // RPM currently being displayed
     rpmMeasured: null,// data.rpm as reported by the ESP32
+    displayRpm: null, // value actually shown (tolerance rolled once, at arrival)
+    displayBelt: null,
     isRunning: false, // motor is physically running
     proxDetected: false,  // current E18 proximity state
     pieceCount: 0,    // rising-edge counted pieces
@@ -878,6 +880,14 @@ function parseTelemetry(rawString) {
         MQTT_STATE.isRunning = SIM.isRunning;
         MQTT_STATE.speedPercent = (mode === 'manual' && isMoving) ? 60 : pwm;
         MQTT_STATE.beltSpeed = rpmToBeltSpeed(rpm);
+        // Display tolerance is rolled HERE, once per packet, rather than on a repaint
+        // timer. Previously the HUD re-randomised on every repaint, which forced a 3 s
+        // refresh throttle to stop the number flickering — and that throttle added up to
+        // 3 s of latency on top of an otherwise ~1 s pipeline. Rolling per packet lets the
+        // readout update the moment data arrives and still reads as sensor noise.
+        const _tol = (v, pct) => v === 0 ? 0 : v * (1 + (Math.random() * 2 - 1) * pct / 100);
+        MQTT_STATE.displayRpm = _tol(rpm, 5);
+        MQTT_STATE.displayBelt = _tol(MQTT_STATE.beltSpeed, 2);
         MQTT_STATE.lastPacketTime = Date.now();
         MQTT_STATE.lastRxMono = performance.now();
         MQTT_STATE.isStale = false;
@@ -1852,9 +1862,6 @@ function drawPowerSparkline(data) {
 createScene().then(({ scene, kinematics, animationGroups }) => {
     const camera = scene.activeCamera;
 
-    // Live Replica Status HUD (RPM / Speed) refresh throttle — see usage below.
-    const REPLICA_HUD_REFRESH_MS = 3000;
-    let lastReplicaHudUpdate = 0;
 
     // Start render loop
     engine.runRenderLoop(() => {
@@ -1965,26 +1972,18 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                         ? `${Math.round(mqttAge)} ms ago`
                         : `${(mqttAge / 1000).toFixed(1)} s ago`;
             }
-            // Sensor-noise tolerance for display realism — never applied to a true 0
-            // (stop command / motor idle), so STOP always reads exactly 0.
-            // Refreshed only every 3s (REPLICA_HUD_REFRESH_MS) so the readout doesn't
-            // flicker every render frame.
-            const applyTolerance = (value, pct) =>
-                value === 0 ? 0 : value * (1 + (Math.random() * 2 - 1) * pct / 100);
-
-            const now = Date.now();
-            if (now - lastReplicaHudUpdate >= REPLICA_HUD_REFRESH_MS) {
-                lastReplicaHudUpdate = now;
-                // Gated on freshness: when the feed is stale the readouts show '—'
-                // rather than jittering a dead value, so tolerance only ever varies
-                // numbers that are actually being updated.
+            // Values are rendered as received. The tolerance was already applied
+            // once at packet arrival (see parseTelemetry), so repainting every frame is
+            // stable and there is no reason to throttle it. This removes up to 3 s of
+            // display latency that sat on top of the transport pipeline.
+            {
                 const usable = HW.connected && dataUsable();
                 const replicaRpm = document.getElementById('model-replica-rpm');
                 if (replicaRpm) replicaRpm.textContent = usable
-                    ? applyTolerance(MQTT_STATE.rpm, 5).toFixed(1) : '—';
+                    ? (MQTT_STATE.displayRpm ?? MQTT_STATE.rpm).toFixed(1) : '—';
                 const replicaSpeed = document.getElementById('model-replica-speed');
                 if (replicaSpeed) replicaSpeed.textContent = usable
-                    ? applyTolerance(MQTT_STATE.beltSpeed, 2).toFixed(3) : '—';
+                    ? (MQTT_STATE.displayBelt ?? MQTT_STATE.beltSpeed).toFixed(3) : '—';
             }
             const replicaProx = document.getElementById('model-replica-prox');
             if (replicaProx) {
@@ -3190,6 +3189,9 @@ const DTX = {
             row('Command success', rate === null ? '--' : rate + '%', rate !== null && rate < 95) +
             row('Deadman events', h.watchdogReverts, h.watchdogReverts > 0) +
             row('Camera restarts', h.camRestarts) +
+            (typeof CAM !== 'undefined'
+                ? CAM.healthRows().map(r => row(r[0], r[1], r[2])).join('')
+                : '') +
             row('Session', ((Date.now() - h.sessionStart) / 60000).toFixed(1) + ' min');
     },
 
@@ -3220,6 +3222,7 @@ const DTX = {
         this.camFailStreak = 0;
         if (manual) this.camLastAutoRestart = Date.now();
         setTimeout(() => this.probeCamera(), 3000);
+        if (typeof CAM !== 'undefined') setTimeout(() => CAM.start(), 500);
     },
 
     setCamStatus(text, kind) {
@@ -3330,6 +3333,7 @@ const DTX = {
         this.updateControlsEnabled();
         setInterval(() => this.updateControlsEnabled(), 1000);
         BROKER.render();
+        if (typeof CAM !== 'undefined') setTimeout(() => CAM.start(), 1200);
 
         // 8. 3D scene readiness. The scene needs roughly a minute of shader
         // compilation for 47 PBR materials, during which the twin is frozen with
@@ -3349,3 +3353,198 @@ const DTX = {
 if (document.readyState === 'loading')
     document.addEventListener('DOMContentLoaded', () => DTX.init());
 else DTX.init();
+
+
+// ============================================================================
+// NATIVE WEBRTC CAMERA PLAYER
+// The feed was a cross-origin iframe, which is a black box: it hides
+// RTCPeerConnection.getStats() entirely, so the delay a researcher actually
+// experiences could not be measured at all - only inferred from frame-delivery
+// rates, which measure throughput rather than latency.
+//
+// Owning the peer connection here gives, per viewer and with no site access:
+// jitter-buffer delay, round-trip time, the ICE candidate type actually in use
+// (host / srflx / relay), freezes and dropped frames.
+//
+// Signalling goes over HTTPS through the Tailscale Funnel, which handles it
+// fine. Media goes peer-to-peer over UDP using the server-reflexive candidate
+// the bridge now advertises. If any of that fails, the iframe fallback is shown
+// and the operator loses nothing but the measurement.
+// ============================================================================
+const CAM = {
+    pc: null,
+    video: null,
+    iframe: null,
+    statsTimer: null,
+    active: false,          // true once WebRTC is actually playing
+    lastStats: null,
+    SETUP_TIMEOUT_MS: 12000,
+
+    baseUrl() {
+        const f = document.getElementById('cam-feed-iframe');
+        if (!f || !f.src) return null;
+        try { return new URL(f.src).origin; } catch (e) { return null; }
+    },
+
+    streamName() {
+        const f = document.getElementById('cam-feed-iframe');
+        try { return new URL(f.src).searchParams.get('src') || 'pi_cam'; }
+        catch (e) { return 'pi_cam'; }
+    },
+
+    async start() {
+        this.video = document.getElementById('cam-feed-video');
+        this.iframe = document.getElementById('cam-feed-iframe');
+        const base = this.baseUrl();
+        if (!this.video || !base) return this.fallback('no video element or base URL');
+
+        this.stop(true);
+        try {
+            const pc = new RTCPeerConnection({
+                // go2rtc advertises its own server-reflexive candidate, so the browser
+                // does not need to run its own STUN discovery to reach it.
+                iceServers: [],
+                bundlePolicy: 'max-bundle',
+            });
+            this.pc = pc;
+            pc.addTransceiver('video', { direction: 'recvonly' });
+
+            pc.ontrack = (e) => {
+                if (e.track.kind !== 'video') return;
+                this.video.srcObject = e.streams[0];
+                this.video.play().catch(() => { /* muted, so autoplay should pass */ });
+            };
+            pc.onconnectionstatechange = () => {
+                if (this.pc !== pc) return;
+                const st = pc.connectionState;
+                if (st === 'connected') this.onConnected();
+                else if (st === 'failed' || st === 'closed') this.fallback('peer connection ' + st);
+            };
+
+            await pc.setLocalDescription(await pc.createOffer());
+            await this.waitForIce(pc);
+
+            const url = base + '/api/webrtc?src=' + encodeURIComponent(this.streamName());
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'offer', sdp: pc.localDescription.sdp }),
+            });
+            if (!res.ok) throw new Error('signalling HTTP ' + res.status);
+            const answer = await res.json();
+            if (!answer || !answer.sdp) throw new Error('signalling returned no SDP');
+            await pc.setRemoteDescription(answer);
+
+            // Never leave a black rectangle on screen if the connection stalls.
+            setTimeout(() => { if (!this.active) this.fallback('setup timed out'); }, this.SETUP_TIMEOUT_MS);
+        } catch (e) {
+            this.fallback(e.message);
+        }
+    },
+
+    // Gather ICE for a bounded time; go2rtc wants the candidates inside the offer.
+    waitForIce(pc) {
+        return new Promise(resolve => {
+            if (pc.iceGatheringState === 'complete') return resolve();
+            const done = () => { pc.removeEventListener('icegatheringstatechange', check); resolve(); };
+            const check = () => { if (pc.iceGatheringState === 'complete') done(); };
+            pc.addEventListener('icegatheringstatechange', check);
+            setTimeout(done, 3000);
+        });
+    },
+
+    onConnected() {
+        this.active = true;
+        this.video.classList.remove('hidden');
+        if (this.iframe) this.iframe.classList.add('hidden');
+        addLog('Camera: native WebRTC connected - latency is now measurable.', 'success');
+        if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_webrtc_connected' });
+        clearInterval(this.statsTimer);
+        this.statsTimer = setInterval(() => this.pollStats(), 2000);
+    },
+
+    // Show the iframe instead. The operator must never be left with a blank panel.
+    fallback(reason) {
+        if (this.active) return;                 // already playing; ignore late errors
+        this.stop(true);
+        if (this.video) this.video.classList.add('hidden');
+        if (this.iframe) this.iframe.classList.remove('hidden');
+        addLog('Camera: WebRTC unavailable (' + reason + ') - using the embedded player. '
+             + 'Latency cannot be measured on that path.', 'warning');
+        if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_webrtc_fallback', reason: reason });
+    },
+
+    stop(quiet) {
+        clearInterval(this.statsTimer); this.statsTimer = null;
+        this.active = false;
+        if (this.pc) { try { this.pc.close(); } catch (e) { } this.pc = null; }
+        if (this.video) this.video.srcObject = null;
+        if (!quiet) addLog('Camera: WebRTC stopped.', 'info');
+    },
+
+    // The measurement the iframe made impossible.
+    async pollStats() {
+        if (!this.pc) return;
+        let report;
+        try { report = await this.pc.getStats(); } catch (e) { return; }
+
+        const s = { bufferMs: null, rttMs: null, candidate: null, fps: null, freezes: null, dropped: null };
+        let pairId = null;
+
+        report.forEach(r => {
+            if (r.type === 'inbound-rtp' && r.kind === 'video') {
+                // Mean time each frame spent in the jitter buffer - the dominant and
+                // previously invisible component of perceived delay.
+                if (r.jitterBufferEmittedCount > 0) {
+                    s.bufferMs = (r.jitterBufferDelay / r.jitterBufferEmittedCount) * 1000;
+                }
+                s.fps = (r.framesPerSecond !== undefined) ? r.framesPerSecond : null;
+                s.freezes = (r.freezeCount !== undefined) ? r.freezeCount : null;
+                s.dropped = (r.framesDropped !== undefined) ? r.framesDropped : null;
+            }
+            if (r.type === 'transport' && r.selectedCandidatePairId) pairId = r.selectedCandidatePairId;
+            if (r.type === 'candidate-pair' && (r.selected || r.state === 'succeeded')) {
+                if (r.currentRoundTripTime != null) s.rttMs = r.currentRoundTripTime * 1000;
+                if (!pairId) pairId = r.id;
+            }
+        });
+
+        report.forEach(r => {
+            if (r.type === 'candidate-pair' && r.id === pairId && r.remoteCandidateId) {
+                const rc = report.get(r.remoteCandidateId);
+                // host = same network, srflx = NAT traversal worked, relay = TURN in use.
+                if (rc) s.candidate = rc.candidateType;
+            }
+        });
+
+        this.lastStats = s;
+    },
+
+    // One-way estimate: jitter buffer plus half the round trip. Decode and render
+    // are excluded, so treat it as a floor rather than true glass-to-glass.
+    latencyMs() {
+        const s = this.lastStats;
+        if (!s || s.bufferMs == null) return null;
+        return s.bufferMs + (s.rttMs != null ? s.rttMs / 2 : 0);
+    },
+
+    // Rows for the health panel.
+    healthRows() {
+        if (!this.active) return [['Camera', 'embedded player (no stats)', true]];
+        const s = this.lastStats;
+        if (!s) return [['Camera', 'WebRTC, measuring…', false]];
+        const lat = this.latencyMs();
+        const path = s.candidate === 'relay' ? 'relay (TURN)'
+            : s.candidate === 'srflx' ? 'direct via NAT'
+                : s.candidate === 'host' ? 'direct (same network)'
+                    : (s.candidate || 'unknown');
+        return [
+            ['Camera path', path, s.candidate === 'relay'],
+            ['Camera latency', lat == null ? '—' : Math.round(lat) + ' ms', lat != null && lat > 800],
+            ['Camera buffer', s.bufferMs == null ? '—' : Math.round(s.bufferMs) + ' ms', s.bufferMs > 600],
+            ['Camera RTT', s.rttMs == null ? '—' : Math.round(s.rttMs) + ' ms', s.rttMs > 300],
+            ['Camera fps', s.fps == null ? '—' : s.fps, s.fps != null && s.fps < 8],
+            ['Camera freezes', s.freezes == null ? '—' : s.freezes, s.freezes > 0],
+        ];
+    },
+};
