@@ -170,6 +170,49 @@ RELAY_INTERVAL_S   = 1.0     # must stay well under the firmware 3s deadman
 MAX_RUN_S          = 600.0   # unattended run cap; expires intent regardless
 RELAY_PAYLOAD      = json.dumps({"mode": "remote"})   # feeds deadman, starts nothing
 
+# The 1 Hz relay makes the ESP32 echo the same [CMD] line every second (~3600
+# lines/hour while running), which would bury real events and, once the
+# SQLite logger lands, be ingested wholesale. Collapse consecutive identical
+# console lines: print the first, then every Nth with a repeat count.
+DUP_LOG_EVERY      = 30
+_dbg_counts        = {}   # console line -> times seen (the ESP32 interleaves
+                          # [TEMP] with [CMD], so consecutive-dedupe would miss)
+
+# -- State signature -> throttle bypass --------------------------------------
+# Cloud plans are throttled to 1 msg/5s per topic to stay inside free tiers.
+# That throttle is also what made the twin lag the machine by up to 8s, so a
+# real STATE CHANGE must publish immediately. It must be a state change and not
+# analogue drift: NB2 current/voltage/power/PF and temperature jitter every
+# single packet even with the belt stopped, so comparing raw payloads would
+# report "changed" on essentially every message, disable throttling entirely,
+# and burn ~5.2M cloud messages/month against a ~1M free tier.
+#
+# So compare only discrete, decision-relevant state. Analogue drift is excluded
+# by construction. Belt stopped -> signature constant -> stays throttled at
+# 1 msg/5s. Start, stop, fault, breaker trip, RS485 loss -> immediate publish.
+RPM_MOTION_THRESHOLD = 1.0
+
+def state_signature(t):
+    """Discrete machine state. Analogue values are deliberately excluded."""
+    nb2 = t.get("nb2") or {}
+    try:
+        rpm = float(t.get("rpm") or 0.0)
+    except (TypeError, ValueError):
+        rpm = 0.0
+    return (
+        t.get("dir"),
+        t.get("speed_percent"),
+        t.get("target_speed_percent"),
+        t.get("control_mode"),
+        bool(t.get("e18_active")),
+        bool(nb2.get("breaker_on")),
+        bool(nb2.get("rs485_ok")),
+        bool(nb2.get("fault_flags")),
+        rpm > RPM_MOTION_THRESHOLD,
+    )
+
+_last_signature = None
+
 _intent_lock     = threading.Lock()
 _intent_cmd      = None      # last motor command the operator actually sent
 _intent_deadline = 0.0       # wall-clock time when operator intent expires
@@ -239,7 +282,7 @@ def note_device_state(t):
           "intent LATCHED OFF, a fresh start command is required")
     publish_all(TOPIC_EVENT, json.dumps({
         "ts": time.time(), "kind": "run_intent_latched_off",
-        "reason": "device_left_remote"}))
+        "reason": "device_left_remote"}), force=True)
 
 def relay_loop():
     """Feed the firmware deadman locally while operator intent is live."""
@@ -268,7 +311,7 @@ def relay_loop():
             print(f"[RELAY] intent EXPIRED ({reason}) -> sending stop")
             serial_write(json.dumps({"cmd": "stop"}), "relay-stop")
             publish_all(TOPIC_EVENT, json.dumps({
-                "ts": now, "kind": "run_intent_expired", "reason": reason}))
+                "ts": now, "kind": "run_intent_expired", "reason": reason}), force=True)
             continue
 
         # Mode-only heartbeat. This refreshes the firmware deadman
@@ -336,12 +379,15 @@ if not clients:
 
 _last_publish = {}  # (broker_name, topic) -> last publish timestamp
 
-def publish_all(topic, payload):
+def publish_all(topic, payload, force=False):
+    """Publish to every enabled broker. force=True bypasses the per-broker
+    throttle -- used only for genuine state changes and events, never for
+    routine analogue drift."""
     now = time.time()
     for name, client in clients.items():
         min_interval = BROKERS[name].get('min_interval', 0)
         key = (name, topic)
-        if min_interval and (now - _last_publish.get(key, 0)) < min_interval:
+        if not force and min_interval and (now - _last_publish.get(key, 0)) < min_interval:
             continue
         try:
             client.publish(topic, payload)
@@ -382,8 +428,15 @@ try:
                     json_str = line[line.find('{'):]
                     json.loads(json_str)  # validate it's json
 
-                    # Publish to every active broker plan
-                    publish_all(TOPIC_TELEMETRY, json_str)
+                    # Publish immediately when discrete state changes;
+                    # otherwise let the per-broker throttle apply.
+                    _t = json.loads(json_str)
+                    _sig = state_signature(_t)
+                    _changed = _sig != _last_signature
+                    if _changed and _last_signature is not None:
+                        print(f"[STATE] {_last_signature} -> {_sig} (immediate publish)")
+                    _last_signature = _sig
+                    publish_all(TOPIC_TELEMETRY, json_str, force=_changed)
 
                     # Latch intent off if the device left REMOTE.
                     try:
@@ -417,7 +470,14 @@ try:
 
             # Print debug lines so you can still see ESP32 console output
             elif line:
-                print(f"[ESP32] {line}")
+                n = _dbg_counts.get(line, 0) + 1
+                _dbg_counts[line] = n
+                if n == 1:
+                    print(f"[ESP32] {line}")
+                elif n % DUP_LOG_EVERY == 0:
+                    print(f"[ESP32] {line}  (seen {n}x)")
+                if len(_dbg_counts) > 200:      # bound the table
+                    _dbg_counts.clear()
         _stop.wait(0.001)
 
 except KeyboardInterrupt:
