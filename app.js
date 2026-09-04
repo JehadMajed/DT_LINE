@@ -271,23 +271,13 @@ const optState = {
 // telemetry to whichever of these are enabled on the Pi side; pick the matching one here
 // with the "select-broker-profile" dropdown in the Overview tab.
 const BROKER_PROFILES = {
-    // Plan A: own Mosquitto broker on the Pi, exposed publicly via `cloudflared tunnel`.
-    // Update this URL every time a Quick Tunnel restarts (or switch to a Named Tunnel
-    // with a stable hostname once you have a domain in Cloudflare).
-    cloudflare: {
-        label: 'Cloudflare Tunnel',
-        brokerUrl: 'wss://gaming-destination-where-transmission.trycloudflare.com',
-        options: {},
-    },
-    // Plan B: HiveMQ Cloud free-tier cluster. Fill in your cluster's WSS URL + credentials
-    // from the HiveMQ Cloud console (Free Tier -> Cluster -> "Access Management").
+    // PRIMARY. Always preferred; the client returns here automatically once it recovers.
     hivemq: {
         label: 'HiveMQ Cloud',
         brokerUrl: 'wss://dcec0602f95f444bb3fe2bcdfd5efc38.s1.eu.hivemq.cloud:8884/mqtt',
         options: { username: 'Lamps', password: 'Aa448866' },
     },
-    // Plan C: EMQX Cloud Serverless free-tier deployment. Fill in from the EMQX Cloud
-    // console (Deployment -> Overview -> WebSocket connection details).
+    // FALLBACK. Used only while the primary is unreachable or silent.
     emqx: {
         label: 'EMQX Cloud',
         brokerUrl: 'wss://xb6e165f.ala.asia-southeast1.emqxsl.com:8084/mqtt',
@@ -295,13 +285,101 @@ const BROKER_PROFILES = {
     },
 };
 
+// Preference order. Index 0 is the primary and the client actively tries to return to it.
+// The old "cloudflare" profile pointed at a Cloudflare Quick Tunnel whose hostname changes
+// on every restart, and the tunnel is not running — it was dead config and is removed.
+// NOTE: the BRIDGE still publishes to the Pi's local Mosquitto (unthrottled, 1 Hz). That is
+// a different thing that happened to share the name; it is kept for on-Pi diagnostics.
+const BROKER_ORDER = ['hivemq', 'emqx'];
+
+// ── Automatic broker selection ───────────────────────────────────────────────
+// No dropdown. The client starts on the primary, fails over on connection loss or
+// telemetry silence, and probes its way back to the primary on a backing-off timer.
+const BROKER = {
+    active: BROKER_ORDER[0],
+    lastSwitchAt: 0,
+    consecutiveFailovers: 0,
+    primaryRetryTimer: null,
+    primaryRetryMs: 5 * 60 * 1000,      // first attempt to return, then doubles
+    PRIMARY_RETRY_MAX_MS: 30 * 60 * 1000,
+    SWITCH_COOLDOWN_MS: 30000,          // never switch more than once per 30 s
+
+    isPrimary() { return this.active === BROKER_ORDER[0]; },
+
+    // Move to the next profile in order. `reason` is logged and recorded.
+    failover(reason) {
+        const now = Date.now();
+        if (now - this.lastSwitchAt < this.SWITCH_COOLDOWN_MS) return false;
+        const i = BROKER_ORDER.indexOf(this.active);
+        const next = BROKER_ORDER[(i + 1) % BROKER_ORDER.length];
+        if (next === this.active) return false;
+        this.lastSwitchAt = now;
+        this.consecutiveFailovers++;
+        addLog(`Broker "${BROKER_PROFILES[this.active].label}" ${reason} — switching to "${BROKER_PROFILES[next].label}".`, 'warning');
+        if (typeof DTX !== 'undefined') {
+            DTX.health.brokerSwitches++;
+            DTX.record('event', { event: 'broker_failover', from: this.active, to: next, reason });
+        }
+        this.active = next;
+        this.render();
+        this.schedulePrimaryRetry();
+        reconnectToActiveBroker();
+        return true;
+    },
+
+    // While on a fallback, periodically try the primary again. If the attempt fails we
+    // land back here and the interval doubles, so a persistently broken primary is not
+    // retried every five minutes forever.
+    schedulePrimaryRetry() {
+        clearTimeout(this.primaryRetryTimer);
+        if (this.isPrimary()) { this.primaryRetryMs = 5 * 60 * 1000; return; }
+        this.primaryRetryTimer = setTimeout(() => {
+            if (this.isPrimary()) return;
+            addLog(`Retrying primary broker "${BROKER_PROFILES[BROKER_ORDER[0]].label}"…`, 'info');
+            if (typeof DTX !== 'undefined') DTX.record('event', { event: 'broker_primary_retry', to: BROKER_ORDER[0] });
+            this.active = BROKER_ORDER[0];
+            this.lastSwitchAt = Date.now();
+            this.primaryRetryMs = Math.min(this.PRIMARY_RETRY_MAX_MS, this.primaryRetryMs * 2);
+            this.render();
+            reconnectToActiveBroker();
+        }, this.primaryRetryMs);
+    },
+
+    // Called once a connection has proven itself healthy (telemetry actually arriving).
+    noteHealthy() {
+        this.consecutiveFailovers = 0;
+        if (this.isPrimary()) {
+            clearTimeout(this.primaryRetryTimer);
+            this.primaryRetryMs = 5 * 60 * 1000;
+        }
+        this.render();
+    },
+
+    render() {
+        const el = document.getElementById('broker-status');
+        if (!el) return;
+        const p = BROKER_PROFILES[this.active];
+        el.textContent = p.label + (this.isPrimary() ? '' : ' (fallback)');
+        el.className = 'broker-status' + (this.isPrimary() ? ' is-primary' : ' is-fallback');
+        el.title = this.isPrimary()
+            ? 'Connected to the primary broker'
+            : 'Primary unavailable — running on the fallback. Will retry the primary automatically.';
+    },
+};
+
+// Tear down the current client and reconnect using BROKER.active.
+function reconnectToActiveBroker() {
+    try { disconnectMQTT(); } catch (e) { /* ignore */ }
+    setTimeout(connectMQTT, 400);
+}
+
+
 const MQTT_CFG = {
     topicSub: 'digital_twin/motor/telemetry', // ESP32 -> app
     topicCmd: 'digital_twin/motor/command',   // app -> ESP32
     clientId: 'dt_twin_' + Math.random().toString(16).slice(2, 8),
     get activeProfile() {
-        const sel = document.getElementById('select-broker-profile');
-        return BROKER_PROFILES[(sel && sel.value) || 'hivemq'];
+        return BROKER_PROFILES[BROKER.active] || BROKER_PROFILES[BROKER_ORDER[0]];
     },
     get brokerUrl() {
         return this.activeProfile.brokerUrl;
@@ -1148,7 +1226,7 @@ function connectMQTT() {
         addLog('Hardware mode active — receiving live ESP32 telemetry JSON via MQTT.', 'success');
         if (typeof DTX !== 'undefined') {
             DTX.tried.clear(); DTX.armFailover(); DTX.updateControlsEnabled();
-            DTX.record('event', { event: 'connected', broker: (document.getElementById('select-broker-profile') || {}).value });
+            DTX.record('event', { event: 'connected', broker: BROKER.active });
         }
     });
 
@@ -1200,6 +1278,8 @@ function connectMQTT() {
         HW.connected = false;
         updateHwBadge(false);
         applyFreshnessToUI();
+        // Repeated reconnect attempts that never land mean this broker is unusable.
+        if ((HW.reconnectAttempt || 0) >= 3) BROKER.failover('unreachable');
     });
 }
 
@@ -3070,24 +3150,8 @@ const DTX = {
         this.failoverTimer = setTimeout(() => {
             if (!HW.connected) return;
             if (telemetryAgeMs() < this.FAILOVER_SILENCE_MS) { this.armFailover(); return; }
-            const sel = document.getElementById('select-broker-profile');
-            if (!sel) return;
-            const opts = [...sel.options].map(o => o.value);
-            this.tried.add(sel.value);
-            const next = opts.find(v => !this.tried.has(v));
-            if (!next) {
-                this.tried.clear();
-                addLog('All broker profiles silent - staying on the current one.', 'warning');
-                this.armFailover();
-                return;
-            }
-            this.health.brokerSwitches++;
-            addLog('No telemetry for ' + (this.FAILOVER_SILENCE_MS / 1000) + ' s on "' + sel.value
-                + '" - failing over to "' + next + '".', 'warning');
-            this.record('event', { event: 'broker_failover', from: sel.value, to: next });
-            sel.value = next;
-            disconnectMQTT();
-            setTimeout(connectMQTT, 400);
+            // Delegate: BROKER owns ordering, cooldown and the return-to-primary logic.
+            if (!BROKER.failover(`silent for ${this.FAILOVER_SILENCE_MS / 1000} s`)) this.armFailover();
         }, this.FAILOVER_SILENCE_MS);
     },
 
@@ -3234,6 +3298,7 @@ const DTX = {
     // Telemetry entry point
     onTelemetry(d) {
         this.notePacket();
+        BROKER.noteHealthy();   // telemetry proves this broker works
         this.checkWatchdogRevert(d);
         this.checkPending(d);
         this.armFailover();
@@ -3264,6 +3329,7 @@ const DTX = {
 
         this.updateControlsEnabled();
         setInterval(() => this.updateControlsEnabled(), 1000);
+        BROKER.render();
 
         // 8. 3D scene readiness. The scene needs roughly a minute of shader
         // compilation for 47 PBR materials, during which the twin is frozen with
