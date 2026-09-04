@@ -7,6 +7,7 @@ import os
 import signal
 import sys
 import hmac
+import uuid
 
 # Fail fast if a second copy of this script is already running (it would fight
 # for the serial port and silently break commands). Uses a pid lock file.
@@ -39,6 +40,23 @@ TOPIC_TELEMETRY = 'digital_twin/motor/telemetry'
 TOPIC_ENCODER = 'digital_twin/encoder/telemetry'
 TOPIC_COMMAND = 'digital_twin/motor/command'
 TOPIC_EVENT = 'digital_twin/motor/event'
+
+# New, ADDITIVE topics. The existing motor/telemetry topic is deliberately left
+# alone and NOT retained: its payload carries only uptime_ms, no wall clock, and
+# the dashboard measures freshness from arrival time -- so a retained copy would
+# arrive looking perfectly fresh even if the Pi had been dead for an hour, which
+# is precisely the stale-data failure this project exists to eliminate.
+# The state document below carries a wall-clock ts, which is what makes
+# retaining it safe: a consumer can compute the true age.
+TOPIC_BRIDGE_STATUS = 'digital_twin/line01/bridge/status'
+TOPIC_STATE = 'digital_twin/line01/state'
+
+BOOT_ID = uuid.uuid4().hex[:12]   # new per bridge start; distinguishes restarts
+DEVICE_TIMEOUT_S = 3.0            # no serial telemetry for this long -> offline
+
+def now_ms():
+    """UTC epoch milliseconds. The Pi is NTP-synced (verified)."""
+    return int(time.time() * 1000)
 
 # ── Breaker-OFF authorization ────────────────────────────────────────────────
 # Opening the NB2 breaker cuts AC mains to the whole station. The dashboard must
@@ -148,6 +166,10 @@ def on_connect(client, userdata, flags, rc):
     if rc == 0:
         client.subscribe(TOPIC_COMMAND, qos=1)
         print(f"[{userdata}] Connected (rc=0), subscribed to {TOPIC_COMMAND}")
+        # Birth: retained, so a fresh subscriber learns we are up immediately.
+        client.publish(TOPIC_BRIDGE_STATUS, json.dumps(
+            {"status": "online", "broker": userdata,
+             "boot_id": BOOT_ID, "ts": now_ms()}), qos=1, retain=True)
     else:
         print(f"[{userdata}] Connect failed rc={rc}")
 
@@ -177,6 +199,71 @@ RELAY_PAYLOAD      = json.dumps({"mode": "remote"})   # feeds deadman, starts no
 DUP_LOG_EVERY      = 30
 _dbg_counts        = {}   # console line -> times seen (the ESP32 interleaves
                           # [TEMP] with [CMD], so consecutive-dedupe would miss)
+
+# -- Device liveness + retained state document -------------------------------
+_state_lock     = threading.Lock()
+_last_device_ms = 0        # when serial telemetry last arrived
+_last_telemetry = None     # the last motor telemetry object, verbatim
+_device_online  = False
+
+def build_state_doc():
+    with _state_lock:
+        last, tel, online = _last_device_ms, _last_telemetry, _device_online
+    with _intent_lock:
+        armed = _intent_cmd is not None
+        expires = int(max(0.0, _intent_deadline - time.time()) * 1000) if armed else None
+    n = now_ms()
+    return json.dumps({
+        "schema": 1,
+        "boot_id": BOOT_ID,
+        "ts": n,
+        "device_online": online,
+        "serial_ok": ser is not None,
+        "last_device_ts": last or None,
+        "device_age_ms": (n - last) if last else None,
+        "telemetry": tel,
+        "intent": {"armed": armed, "expires_in_ms": expires},
+    })
+
+def publish_state(force=False):
+    publish_all(TOPIC_STATE, build_state_doc(), force=force, qos=1, retain=True)
+
+def note_device_telemetry(t):
+    """Serial telemetry arrived: refresh liveness, and announce recovery."""
+    global _last_device_ms, _last_telemetry, _device_online
+    recovered = False
+    with _state_lock:
+        _last_device_ms = now_ms()
+        _last_telemetry = t
+        if not _device_online:
+            _device_online = True
+            recovered = True
+    if recovered:
+        print("[LIVENESS] device_online -> TRUE")
+        publish_all(TOPIC_EVENT, json.dumps(
+            {"kind": "device_online", "ts": now_ms()}), force=True)
+        publish_state(force=True)
+
+def liveness_loop():
+    """Detect the ABSENCE of packets, so it must be timer-driven -- a handler
+    that runs on arrival can never fire when nothing arrives."""
+    global _device_online
+    while not _stop.is_set():
+        _stop.wait(0.5)
+        if _stop.is_set():
+            break
+        with _state_lock:
+            last, online = _last_device_ms, _device_online
+        if not online or not last:
+            continue
+        gap = now_ms() - last
+        if gap > DEVICE_TIMEOUT_S * 1000:
+            with _state_lock:
+                _device_online = False
+            print(f"[LIVENESS] device_online -> FALSE (silent {gap} ms)")
+            publish_all(TOPIC_EVENT, json.dumps(
+                {"kind": "device_offline", "gap_ms": gap, "ts": now_ms()}), force=True)
+            publish_state(force=True)
 
 # -- State signature -> throttle bypass --------------------------------------
 # Cloud plans are throttled to 1 msg/5s per topic to stay inside free tiers.
@@ -280,6 +367,8 @@ def note_device_state(t):
         _intent_deadline = 0.0
     print("[RELAY] device reverted to MANUAL while intent held -> "
           "intent LATCHED OFF, a fresh start command is required")
+    serial_write(json.dumps({"cmd": "stop"}), "latch-stop")
+    serial_write(json.dumps({"mode": "manual"}), "latch-disarm")
     publish_all(TOPIC_EVENT, json.dumps({
         "ts": time.time(), "kind": "run_intent_latched_off",
         "reason": "device_left_remote"}), force=True)
@@ -308,8 +397,12 @@ def relay_loop():
             with _intent_lock:
                 _intent_cmd = None
                 _intent_deadline = 0.0
-            print(f"[RELAY] intent EXPIRED ({reason}) -> sending stop")
+            print(f"[RELAY] intent EXPIRED ({reason}) -> stop + disarm")
             serial_write(json.dumps({"cmd": "stop"}), "relay-stop")
+            # Return the device to MANUAL so it is not left armed. The firmware
+            # deadman only fires while targetSpeedPercent > 0, so a stopped-but-
+            # REMOTE device would otherwise accept a stray start immediately.
+            serial_write(json.dumps({"mode": "manual"}), "relay-disarm")
             publish_all(TOPIC_EVENT, json.dumps({
                 "ts": now, "kind": "run_intent_expired", "reason": reason}), force=True)
             continue
@@ -357,6 +450,9 @@ for name, cfg in BROKERS.items():
     if not cfg['enabled']:
         continue
     client = mqtt.Client(client_id=f"rpi_serial_bridge_{name}", userdata=name)
+    # Last will, registered before connect: fires only on UNGRACEFUL loss.
+    client.will_set(TOPIC_BRIDGE_STATUS, json.dumps(
+        {"status": "offline", "broker": name, "reason": "lwt"}), qos=1, retain=True)
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
     client.on_message = on_message
@@ -379,7 +475,7 @@ if not clients:
 
 _last_publish = {}  # (broker_name, topic) -> last publish timestamp
 
-def publish_all(topic, payload, force=False):
+def publish_all(topic, payload, force=False, qos=0, retain=False):
     """Publish to every enabled broker. force=True bypasses the per-broker
     throttle -- used only for genuine state changes and events, never for
     routine analogue drift."""
@@ -390,7 +486,7 @@ def publish_all(topic, payload, force=False):
         if not force and min_interval and (now - _last_publish.get(key, 0)) < min_interval:
             continue
         try:
-            client.publish(topic, payload)
+            client.publish(topic, payload, qos=qos, retain=retain)
             _last_publish[key] = now
         except Exception as e:
             print(f"[{name}] Publish failed: {e}")
@@ -398,6 +494,7 @@ def publish_all(topic, payload, force=False):
 # Main loop: Read from Serial and publish to all connected brokers
 _relay_thread = threading.Thread(target=relay_loop, name="relay", daemon=True)
 _relay_thread.start()
+threading.Thread(target=liveness_loop, name="liveness", daemon=True).start()
 print(f"[RELAY] heartbeat relay active (operator budget {OPERATOR_TIMEOUT_S}s, relay every {RELAY_INTERVAL_S}s, run cap {MAX_RUN_S}s)")
 
 print(f"Listening for telemetry... Active plans: {list(clients.keys())}. Press Ctrl+C to exit.")
@@ -437,6 +534,9 @@ try:
                         print(f"[STATE] {_last_signature} -> {_sig} (immediate publish)")
                     _last_signature = _sig
                     publish_all(TOPIC_TELEMETRY, json_str, force=_changed)
+
+                    note_device_telemetry(_t)
+                    publish_state(force=_changed)
 
                     # Latch intent off if the device left REMOTE.
                     try:
@@ -488,6 +588,14 @@ finally:
             ser.close()
     except Exception:
         pass
+    for _name, client in clients.items():
+        try:
+            client.publish(TOPIC_BRIDGE_STATUS, json.dumps(
+                {"status": "offline", "broker": _name,
+                 "reason": "sigterm", "ts": now_ms()}), qos=1, retain=True)
+        except Exception:
+            pass
+    time.sleep(0.5)          # let the retained offline message reach the broker
     for client in clients.values():
         try:
             client.loop_stop()
