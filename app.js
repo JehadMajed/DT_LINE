@@ -154,6 +154,8 @@ const STALE_MS   = 25000;  // >  DELAYED: STALE (twin frozen, values struck thro
 const MQTT_STATE = {
     rpm: 0,           // RPM currently being displayed
     rpmMeasured: null,// data.rpm as reported by the ESP32
+    displayRpm: null, // value actually shown (tolerance rolled once, at arrival)
+    displayBelt: null,
     isRunning: false, // motor is physically running
     proxDetected: false,  // current E18 proximity state
     pieceCount: 0,    // rising-edge counted pieces
@@ -878,6 +880,14 @@ function parseTelemetry(rawString) {
         MQTT_STATE.isRunning = SIM.isRunning;
         MQTT_STATE.speedPercent = (mode === 'manual' && isMoving) ? 60 : pwm;
         MQTT_STATE.beltSpeed = rpmToBeltSpeed(rpm);
+        // Display tolerance is rolled HERE, once per packet, rather than on a repaint
+        // timer. Previously the HUD re-randomised on every repaint, which forced a 3 s
+        // refresh throttle to stop the number flickering — and that throttle added up to
+        // 3 s of latency on top of an otherwise ~1 s pipeline. Rolling per packet lets the
+        // readout update the moment data arrives and still reads as sensor noise.
+        const _tol = (v, pct) => v === 0 ? 0 : v * (1 + (Math.random() * 2 - 1) * pct / 100);
+        MQTT_STATE.displayRpm = _tol(rpm, 5);
+        MQTT_STATE.displayBelt = _tol(MQTT_STATE.beltSpeed, 2);
         MQTT_STATE.lastPacketTime = Date.now();
         MQTT_STATE.lastRxMono = performance.now();
         MQTT_STATE.isStale = false;
@@ -1852,9 +1862,6 @@ function drawPowerSparkline(data) {
 createScene().then(({ scene, kinematics, animationGroups }) => {
     const camera = scene.activeCamera;
 
-    // Live Replica Status HUD (RPM / Speed) refresh throttle — see usage below.
-    const REPLICA_HUD_REFRESH_MS = 3000;
-    let lastReplicaHudUpdate = 0;
 
     // Start render loop
     engine.runRenderLoop(() => {
@@ -1965,26 +1972,18 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                         ? `${Math.round(mqttAge)} ms ago`
                         : `${(mqttAge / 1000).toFixed(1)} s ago`;
             }
-            // Sensor-noise tolerance for display realism — never applied to a true 0
-            // (stop command / motor idle), so STOP always reads exactly 0.
-            // Refreshed only every 3s (REPLICA_HUD_REFRESH_MS) so the readout doesn't
-            // flicker every render frame.
-            const applyTolerance = (value, pct) =>
-                value === 0 ? 0 : value * (1 + (Math.random() * 2 - 1) * pct / 100);
-
-            const now = Date.now();
-            if (now - lastReplicaHudUpdate >= REPLICA_HUD_REFRESH_MS) {
-                lastReplicaHudUpdate = now;
-                // Gated on freshness: when the feed is stale the readouts show '—'
-                // rather than jittering a dead value, so tolerance only ever varies
-                // numbers that are actually being updated.
+            // Values are rendered as received. The tolerance was already applied
+            // once at packet arrival (see parseTelemetry), so repainting every frame is
+            // stable and there is no reason to throttle it. This removes up to 3 s of
+            // display latency that sat on top of the transport pipeline.
+            {
                 const usable = HW.connected && dataUsable();
                 const replicaRpm = document.getElementById('model-replica-rpm');
                 if (replicaRpm) replicaRpm.textContent = usable
-                    ? applyTolerance(MQTT_STATE.rpm, 5).toFixed(1) : '—';
+                    ? (MQTT_STATE.displayRpm ?? MQTT_STATE.rpm).toFixed(1) : '—';
                 const replicaSpeed = document.getElementById('model-replica-speed');
                 if (replicaSpeed) replicaSpeed.textContent = usable
-                    ? applyTolerance(MQTT_STATE.beltSpeed, 2).toFixed(3) : '—';
+                    ? (MQTT_STATE.displayBelt ?? MQTT_STATE.beltSpeed).toFixed(3) : '—';
             }
             const replicaProx = document.getElementById('model-replica-prox');
             if (replicaProx) {
