@@ -11,3 +11,6 @@ Thumbs.db
 
 # Firmware rollback image (4MB binary)
 backup/
+
+# Local telemetry database
+data/

@@ -8,6 +8,7 @@ import signal
 import sys
 import hmac
 import uuid
+import dt_store
 
 # Fail fast if a second copy of this script is already running (it would fight
 # for the serial port and silently break commands). Uses a pid lock file.
@@ -57,6 +58,33 @@ DEVICE_TIMEOUT_S = 3.0            # no serial telemetry for this long -> offline
 def now_ms():
     """UTC epoch milliseconds. The Pi is NTP-synced (verified)."""
     return int(time.time() * 1000)
+
+# -- SQLite logger ------------------------------------------------------------
+# Lives outside git (data/ is gitignored). Retention: raw telemetry 14 days,
+# health 90 days, events/commands/connections indefinitely -- they are the
+# incident record and they are small.
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "dt.db")
+STORE = dt_store.Store(DB_PATH, BOOT_ID)
+STORE.start()   # before brokers connect, or their first connect rows are lost
+
+# -- Cloud publishing budget --------------------------------------------------
+# Both cloud plans sit on a ~1M message/month free tier. Measured per broker at
+# idle before tuning: encoder 11.5/min + telemetry 10/min + state 10.5/min
+# = ~1.4M/month, i.e. over tier by day ~21.
+#
+# The encoder topic has NO cloud consumer: the deployed dashboard subscribes to
+# digital_twin/# but dispatches only motor/telemetry and motor/event, and the
+# NodeRED flow in Scripts/ contains no MQTT nodes at all. It was ~497k
+# messages/month published to brokers nobody reads -- and the encoder is faulty
+# and under investigation, so the data is not trustworthy yet either. It stays
+# on the LOCAL broker at full 1 Hz, which is where triage actually happens.
+LOCAL_ONLY_TOPICS = {TOPIC_ENCODER}
+
+# Per-topic cloud floor, applied on top of the per-broker min_interval. The
+# state document is RETAINED, so a page load is instant regardless of cadence,
+# and signature changes plus device_online flips force-publish past the
+# throttle. Only the idle heartbeat slows down.
+TOPIC_CLOUD_MIN_INTERVAL = {TOPIC_STATE: 15}
 
 # ── Breaker-OFF authorization ────────────────────────────────────────────────
 # Opening the NB2 breaker cuts AC mains to the whole station. The dashboard must
@@ -134,6 +162,7 @@ def open_serial():
                         pass
                 ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
             print(f"Connected to ESP32 on {SERIAL_PORT}")
+            STORE.log_event("serial_open", detail={"port": SERIAL_PORT})
             return
         except Exception as e:
             print(f"Serial open failed ({e}); retrying in 3s. "
@@ -166,6 +195,8 @@ def on_connect(client, userdata, flags, rc):
     if rc == 0:
         client.subscribe(TOPIC_COMMAND, qos=1)
         print(f"[{userdata}] Connected (rc=0), subscribed to {TOPIC_COMMAND}")
+        note_link_up(f"mqtt:{userdata}", BROKERS[userdata]["host"])
+        STORE.log_event("broker_up", detail={"broker": userdata})
         # Birth: retained, so a fresh subscriber learns we are up immediately.
         client.publish(TOPIC_BRIDGE_STATUS, json.dumps(
             {"status": "online", "broker": userdata,
@@ -173,8 +204,23 @@ def on_connect(client, userdata, flags, rc):
     else:
         print(f"[{userdata}] Connect failed rc={rc}")
 
+_link_down_ms = {}      # link name -> when it went down, for downtime_ms
+
+def note_link_down(link, endpoint, reason):
+    _link_down_ms[link] = now_ms()
+    STORE.log_connection(link, endpoint, ts_down=now_ms(), reason=reason)
+
+def note_link_up(link, endpoint, reason="connected"):
+    down = _link_down_ms.pop(link, None)
+    STORE.log_connection(link, endpoint, ts_up=now_ms(), ts_down=down,
+                         downtime_ms=(now_ms() - down) if down else None,
+                         reason=reason)
+
 def on_disconnect(client, userdata, rc):
     print(f"[{userdata}] Disconnected (rc={rc}); paho will auto-reconnect.")
+    note_link_down(f"mqtt:{userdata}", BROKERS[userdata]["host"], f"rc={rc}")
+    STORE.log_event("broker_down", severity="warn",
+                    detail={"broker": userdata, "rc": rc})
 
 # -- Operator intent + heartbeat relay ---------------------------------------
 # The firmware force-stops the motor (and reverts to MANUAL) if it sees no
@@ -199,6 +245,58 @@ RELAY_PAYLOAD      = json.dumps({"mode": "remote"})   # feeds deadman, starts no
 DUP_LOG_EVERY      = 30
 _dbg_counts        = {}   # console line -> times seen (the ESP32 interleaves
                           # [TEMP] with [CMD], so consecutive-dedupe would miss)
+
+# -- Host health sampling (1/min) --------------------------------------------
+_tel_hz_recent = 0.0
+
+def _read_cpu_times():
+    with open("/proc/stat") as f:
+        parts = [float(x) for x in f.readline().split()[1:]]
+    idle = parts[3] + parts[4]
+    return sum(parts), idle
+
+def health_loop():
+    prev_total, prev_idle = _read_cpu_times()
+    while not _stop.is_set():
+        _stop.wait(60)
+        if _stop.is_set():
+            break
+        try:
+            total, idle = _read_cpu_times()
+            dt_total, dt_idle = total - prev_total, idle - prev_idle
+            cpu = 100.0 * (1 - dt_idle / dt_total) if dt_total > 0 else None
+            prev_total, prev_idle = total, idle
+
+            mem = {}
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    k, v = line.split(":", 1)
+                    mem[k] = float(v.strip().split()[0])
+            mem_pct = 100.0 * (1 - mem.get("MemAvailable", 0) / mem.get("MemTotal", 1))
+
+            try:
+                with open("/sys/class/thermal/thermal_zone0/temp") as f:
+                    cpu_temp = float(f.read().strip()) / 1000.0
+            except Exception:
+                cpu_temp = None
+
+            st = os.statvfs("/")
+            disk_free_mb = st.f_bavail * st.f_frsize / 1048576.0
+
+            rss_mb = None
+            with open("/proc/self/status") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        rss_mb = float(line.split()[1]) / 1024.0
+                        break
+
+            STORE.log_health(cpu_pct=cpu, mem_pct=mem_pct, cpu_temp_c=cpu_temp,
+                             disk_free_mb=disk_free_mb, bridge_rss_mb=rss_mb,
+                             telemetry_hz=_tel_hz_recent,
+                             relay_active=_relay_thread.is_alive(),
+                             intent_armed=_intent_cmd is not None)
+        except Exception as e:
+            print(f"[HEALTH] sample failed: {e}")
 
 # -- Device liveness + retained state document -------------------------------
 _state_lock     = threading.Lock()
@@ -240,6 +338,8 @@ def note_device_telemetry(t):
             recovered = True
     if recovered:
         print("[LIVENESS] device_online -> TRUE")
+        STORE.log_event("device_online", detail={"boot_id": BOOT_ID})
+        note_link_up("device", SERIAL_PORT, "telemetry resumed")
         publish_all(TOPIC_EVENT, json.dumps(
             {"kind": "device_online", "ts": now_ms()}), force=True)
         publish_state(force=True)
@@ -261,6 +361,8 @@ def liveness_loop():
             with _state_lock:
                 _device_online = False
             print(f"[LIVENESS] device_online -> FALSE (silent {gap} ms)")
+            STORE.log_event("device_offline", severity="warn", detail={"gap_ms": gap})
+            note_link_down("device", SERIAL_PORT, f"silent {gap} ms")
             publish_all(TOPIC_EVENT, json.dumps(
                 {"kind": "device_offline", "gap_ms": gap, "ts": now_ms()}), force=True)
             publish_state(force=True)
@@ -367,6 +469,8 @@ def note_device_state(t):
         _intent_deadline = 0.0
     print("[RELAY] device reverted to MANUAL while intent held -> "
           "intent LATCHED OFF, a fresh start command is required")
+    STORE.log_event("run_intent_latched_off", severity="warn",
+                    detail={"reason": "device_left_remote"})
     serial_write(json.dumps({"cmd": "stop"}), "latch-stop")
     serial_write(json.dumps({"mode": "manual"}), "latch-disarm")
     publish_all(TOPIC_EVENT, json.dumps({
@@ -398,6 +502,8 @@ def relay_loop():
                 _intent_cmd = None
                 _intent_deadline = 0.0
             print(f"[RELAY] intent EXPIRED ({reason}) -> stop + disarm")
+            STORE.log_event("run_intent_expired", severity="warn",
+                            detail={"reason": reason})
             serial_write(json.dumps({"cmd": "stop"}), "relay-stop")
             # Return the device to MANUAL so it is not left armed. The firmware
             # deadman only fires while targetSpeedPercent > 0, so a stopped-but-
@@ -429,6 +535,8 @@ def on_message(client, userdata, msg):
             supplied = obj.get('key', '')
             if not BREAKER_SECRET or not hmac.compare_digest(str(supplied), BREAKER_SECRET):
                 print(f"[AUTH] REJECTED breaker OFF from {userdata} (bad/missing key)")
+                STORE.log_event("breaker_off_rejected", severity="warn",
+                                detail={"broker": userdata})
                 try:
                     for c in clients.values():
                         c.publish(TOPIC_EVENT, json.dumps({
@@ -442,7 +550,11 @@ def on_message(client, userdata, msg):
 
     print(f"[MQTT:{userdata} -> ESP32] Sending: {command_json}")
     note_operator_command(obj, command_json)
-    serial_write(command_json, f"mqtt:{userdata}")
+    ok = serial_write(command_json, f"mqtt:{userdata}")
+    # No device ACK exists yet (item 5), so forwarded_ok records only that the
+    # bytes reached the serial port -- deliberately not an execution claim.
+    STORE.log_command(uuid.uuid4().hex, userdata, command_json, ok,
+                      None if ok else "serial write failed")
 
 # Initialize one MQTT client per enabled broker plan
 clients = {}
@@ -482,6 +594,11 @@ def publish_all(topic, payload, force=False, qos=0, retain=False):
     now = time.time()
     for name, client in clients.items():
         min_interval = BROKERS[name].get('min_interval', 0)
+        is_cloud = min_interval > 0          # local plan runs unthrottled
+        if is_cloud and topic in LOCAL_ONLY_TOPICS:
+            continue                          # no cloud consumer for this topic
+        if is_cloud:
+            min_interval = max(min_interval, TOPIC_CLOUD_MIN_INTERVAL.get(topic, 0))
         key = (name, topic)
         if not force and min_interval and (now - _last_publish.get(key, 0)) < min_interval:
             continue
@@ -495,9 +612,18 @@ def publish_all(topic, payload, force=False, qos=0, retain=False):
 _relay_thread = threading.Thread(target=relay_loop, name="relay", daemon=True)
 _relay_thread.start()
 threading.Thread(target=liveness_loop, name="liveness", daemon=True).start()
+threading.Thread(target=health_loop, name="health", daemon=True).start()
 print(f"[RELAY] heartbeat relay active (operator budget {OPERATOR_TIMEOUT_S}s, relay every {RELAY_INTERVAL_S}s, run cap {MAX_RUN_S}s)")
 
 print(f"Listening for telemetry... Active plans: {list(clients.keys())}. Press Ctrl+C to exit.")
+# Journal thinning. Every telemetry row now lands in SQLite, so the journal
+# does not need to carry a line per packet (previously ~180 lines/min, which
+# buried real events). Summarise instead.
+SUMMARY_INTERVAL_S = 30
+_tel_count = 0
+_enc_count = 0
+_last_summary = time.time()
+
 _read_errors = 0
 try:
     while not _stop.is_set():
@@ -512,6 +638,8 @@ try:
             backoff = min(_read_errors, 5)
             if _read_errors <= 3 or _read_errors % 10 == 0:
                 print(f"Serial read error #{_read_errors} ({e}); reopen in {backoff}s…")
+                STORE.log_event("serial_error", severity="warn",
+                                detail={"n": _read_errors, "error": str(e)})
             _stop.wait(backoff)
             open_serial()
             continue
@@ -544,18 +672,8 @@ try:
                     except Exception:
                         pass
 
-                    # Parse and print full formatted readings
-                    try:
-                        t_data = json.loads(json_str)
-                        nb2 = t_data.get('nb2', {})
-                        v = nb2.get('voltage', '--')
-                        c = nb2.get('current', '--')
-                        p = nb2.get('active_power', '--')
-                        pf = nb2.get('power_factor', '--')
-                        rs = "OK" if nb2.get('rs485_ok') else "FAIL"
-                        print(f"[ESP32 -> MQTT] RPM: {t_data.get('rpm', 0):.1f} | AC: {v}V, {c}A, {p}W (PF: {pf}) | RS485: {rs}")
-                    except Exception:
-                        print(f"[ESP32 -> MQTT] Telemetry: {json_str}")
+                    STORE.log_telemetry(_t, _device_online)
+                    _tel_count += 1
                 except json.JSONDecodeError:
                     print(f"Invalid JSON from Serial: {line}")
 
@@ -564,7 +682,7 @@ try:
                 try:
                     json_str = line[line.find('{'):]
                     publish_all(TOPIC_ENCODER, json_str)
-                    print(f"[ESP32 -> MQTT] Encoder: {json_str[:50]}...")
+                    _enc_count += 1
                 except json.JSONDecodeError:
                     pass
 
@@ -578,6 +696,16 @@ try:
                     print(f"[ESP32] {line}  (seen {n}x)")
                 if len(_dbg_counts) > 200:      # bound the table
                     _dbg_counts.clear()
+        if time.time() - _last_summary >= SUMMARY_INTERVAL_S:
+            _win = time.time() - _last_summary
+            print(f"[SUMMARY] {_win:.0f}s: telemetry {_tel_count} "
+                  f"({_tel_count/_win:.2f} Hz), encoder {_enc_count} "
+                  f"({_enc_count/_win:.2f} Hz), device_online={_device_online}, "
+                  f"intent_armed={_intent_cmd is not None}")
+            _tel_hz_recent = _tel_count / _win
+            _tel_count = 0
+            _enc_count = 0
+            _last_summary = time.time()
         _stop.wait(0.001)
 
 except KeyboardInterrupt:
@@ -586,6 +714,11 @@ finally:
     try:
         if ser is not None:
             ser.close()
+    except Exception:
+        pass
+    try:
+        STORE.log_event("bridge_stopping", detail={"boot_id": BOOT_ID})
+        STORE.stop()
     except Exception:
         pass
     for _name, client in clients.items():
