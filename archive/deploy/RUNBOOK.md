@@ -18,7 +18,7 @@ Two things must survive reboots and run forever on the Pi:
 
 ```bash
 cd ~/DT_LINE && git pull        # or copy the deploy/ folder + updated serial_mqtt_bridge.py over
-bash ~/DT_LINE/deploy/install.sh
+bash ~/DT_LINE/archive/deploy/install.sh
 ```
 
 Then merge `deploy/go2rtc.reference.yaml` into `~/go2rtc.yaml` and:
@@ -37,10 +37,10 @@ tailscale serve status
 ## Test (≈15 min)
 
 ```bash
-bash ~/DT_LINE/deploy/test_stability.sh
+bash ~/DT_LINE/archive/deploy/test_stability.sh
 sudo reboot
 # wait 2 min, SSH back in
-bash ~/DT_LINE/deploy/test_stability.sh
+bash ~/DT_LINE/archive/deploy/test_stability.sh
 ```
 
 Steps [1][2][3][7] must PASS after a cold boot **with zero manual commands**.

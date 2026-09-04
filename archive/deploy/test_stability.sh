@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run ON THE PI:  bash ~/DT_LINE/deploy/test_stability.sh
+# Run ON THE PI:  bash ~/DT_LINE/archive/deploy/test_stability.sh
 # Proves: services autostart, survive crashes, survive a serial unplug,
 # survive an MQTT reconnect, and that commands actually reach the ESP32.
 set -u

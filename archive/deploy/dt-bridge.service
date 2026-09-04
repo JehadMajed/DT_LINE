@@ -9,8 +9,8 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 User=jehadroot
-WorkingDirectory=/home/jehadroot/DT_LINE
-ExecStart=/usr/bin/python3 -u /home/jehadroot/DT_LINE/serial_mqtt_bridge.py
+WorkingDirectory=/home/jehadroot/DT_LINE/archive
+ExecStart=/usr/bin/python3 -u /home/jehadroot/DT_LINE/archive/serial_mqtt_bridge.py
 # Give the USB serial adapter a moment to enumerate after a cold boot.
 ExecStartPre=/bin/sleep 5
 Restart=always

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run ON THE PI:  bash ~/DT_LINE/deploy/install.sh
+# Run ON THE PI:  bash ~/DT_LINE/archive/deploy/install.sh
 # Idempotent: safe to re-run.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
