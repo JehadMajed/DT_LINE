@@ -1,0 +1,16 @@
+[Unit]
+Description=Digital Twin - go2rtc consumer transport poller (read-only telemetry)
+After=network-online.target go2rtc.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jehadroot
+ExecStart=/usr/bin/python3 -u /home/jehadroot/DT_LINE/archive/tools/transport_poll.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

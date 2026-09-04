@@ -1,0 +1,23 @@
+streams:
+  # --mode 1920:1080 pins the SENSOR mode. Without it, requesting 640x360 lets
+  # rpicam-vid pick the imx219 640x480 mode (it satisfies >=640x360), which is a
+  # different, narrower crop of the sensor -- a field-of-view regression for the
+  # researchers watching the belt. Pinned to the mode already in use (confirmed
+  # via media-ctl while streaming), so the ISP simply downscales 1920x1080 to
+  # 640x360. Identical framing, both 16:9.
+  #
+  # 500 kbit/s is a viewer-count decision, not a latency one: go2rtc does not
+  # transcode, so every consumer takes its own full-rate copy. At 1.0 Mbit/s two
+  # viewers use ~70% of the ~3.2 Mbit/s uplink and four saturate it; at 0.5 Mbit/s
+  # roughly six fit. Measured offset was a fixed ~1-2 s, NOT unbounded growth.
+  pi_cam: exec:rpicam-vid -t 0 -n --inline --flush 1 --rotation 180 --mode 1920:1080 --width 640 --height 360 --framerate 12 --bitrate 500000 --codec h264 --libav-format h264 --profile baseline --level 4.1 --intra 12 -o - #video=h264
+
+# Advertise a STUN-discovered public candidate for UDP 8555. The site is behind
+# CGNAT (public IPv4 differs by protocol and over time, router reports 0.0.0.0),
+# so port forwarding is impossible -- but netcheck reports
+# MappingVariesByDestIP: false, i.e. endpoint-independent NAT, which is exactly
+# the condition where STUN hole-punching works THROUGH CGNAT. This adds a
+# candidate; it removes none, so the working paths keep working.
+webrtc:
+  candidates:
+    - stun:8555
