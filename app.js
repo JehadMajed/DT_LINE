@@ -2822,6 +2822,10 @@ const camPanRight = document.getElementById("cam-pan-right");
 const camZoomWrapper = document.getElementById("cam-zoom-wrapper");
 const camfeedViewport = document.getElementById("camfeed-viewport");
 const camFeedIframe = document.getElementById("cam-feed-iframe");
+// Captured once, before native WebRTC or any restart can blank/rewrite
+// iframe.src. probeCamera()/restartCamera() must key off THIS, not the live
+// iframe.src, or blanking the iframe on WebRTC success poisons both.
+const CAM_IFRAME_SRC = camFeedIframe ? camFeedIframe.src : null;
 
 // go2rtc's stream.html won't render its player below 320px wide and overflows a
 // smaller panel. Render the iframe at a fixed 640px logical width and scale it
@@ -3211,7 +3215,10 @@ const DTX = {
     restartCamera(manual) {
         const f = document.getElementById('cam-feed-iframe');
         if (!f) return;
-        if (!this.camBaseSrc) this.camBaseSrc = f.src.split('&_r=')[0].split('?_r=')[0];
+        if (!this.camBaseSrc) {
+            const seed = CAM_IFRAME_SRC || f.src;   // never seed from a blanked src
+            this.camBaseSrc = seed.split('&_r=')[0].split('?_r=')[0];
+        }
         const sep = this.camBaseSrc.indexOf('?') !== -1 ? '&' : '?';
         this.health.camRestarts++;
         this.setCamStatus('Restarting...', 'warn');
@@ -3244,11 +3251,10 @@ const DTX = {
     //   3. nothing is ever inferred unless the probe has succeeded at least once
     //      in this environment, so an unsupported endpoint stays silent forever.
     probeCamera() {
-        const f = document.getElementById('cam-feed-iframe');
-        if (!f || !f.src) return;
+        if (!CAM_IFRAME_SRC) return;
         let origin, srcName;
         try {
-            const u = new URL(f.src);
+            const u = new URL(CAM_IFRAME_SRC);   // independent of iframe's live src
             origin = u.origin;
             srcName = u.searchParams.get('src') || 'pi_cam';
         } catch (e) { return; }
@@ -3462,7 +3468,10 @@ const CAM = {
     onConnected() {
         this.active = true;
         this.video.classList.remove('hidden');
-        if (this.iframe) this.iframe.classList.add('hidden');
+        if (this.iframe) {
+            this.iframe.classList.add('hidden');
+            this.iframe.src = 'about:blank';   // actually close its WebRTC session
+        }
         addLog('Camera: native WebRTC connected - latency is now measurable.', 'success');
         if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_webrtc_connected' });
         clearInterval(this.statsTimer);
@@ -3474,7 +3483,12 @@ const CAM = {
         if (this.active) return;                 // already playing; ignore late errors
         this.stop(true);
         if (this.video) this.video.classList.add('hidden');
-        if (this.iframe) this.iframe.classList.remove('hidden');
+        if (this.iframe) {
+            this.iframe.classList.remove('hidden');
+            if (CAM_IFRAME_SRC && this.iframe.src !== CAM_IFRAME_SRC) {
+                this.iframe.src = CAM_IFRAME_SRC;   // restore real feed, was blanked by onConnected()
+            }
+        }
         addLog('Camera: WebRTC unavailable (' + reason + ') - using the embedded player. '
              + 'Latency cannot be measured on that path.', 'warning');
         if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_webrtc_fallback', reason: reason });
