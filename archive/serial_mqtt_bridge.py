@@ -556,6 +556,10 @@ def liveness_loop():
                 _device_online = False
             print(f"[LIVENESS] device_online -> FALSE (silent {gap} ms)")
             STORE.log_event("device_offline", severity="warn", detail={"gap_ms": gap})
+            # If we cannot see the machine, we must not keep it running. This
+            # fires at 3 s, well before the recovery ladder's 15 s rung 1, and
+            # hands over to the firmware deadman (~3 s) as the fail-safe.
+            _drop_intent("device_offline")
             note_link_down("device", SERIAL_PORT, f"silent {gap} ms")
             publish_all(TOPIC_EVENT, json.dumps(
                 {"kind": "device_offline", "gap_ms": gap, "ts": now_ms()}), force=True)
@@ -709,6 +713,17 @@ def relay_loop():
             serial_write(json.dumps({"mode": "manual"}), "relay-disarm")
             publish_all(TOPIC_EVENT, json.dumps({
                 "ts": now, "kind": "run_intent_expired", "reason": reason}), force=True)
+            continue
+
+        # Never sustain a run we cannot observe. _drop_intent already fires
+        # from the liveness timer, but this is the guard that matters if intent
+        # is somehow (re-)armed while the device is silent: the relay is what
+        # keeps the firmware deadman fed, so refusing to write here is what
+        # actually lets the machine stop.
+        with _state_lock:
+            visible = _device_online
+        if not visible:
+            _drop_intent("device_not_visible")
             continue
 
         # Mode-only heartbeat. This refreshes the firmware deadman

@@ -47,8 +47,16 @@ if systemctl is-active --quiet dt-bridge; then
     fi
 fi
 
+# CAMERA OWNERSHIP: go2rtc, rpicam-vid and the Tailscale Funnel are owned by a
+# separate concurrent session. This watchdog must not restart the camera or
+# rewrite the Funnel mapping underneath it -- two processes independently
+# restarting the same service is the failure that cost us a serial-port
+# debugging session. Set MANAGE_CAMERA=1 to restore checks 3 and 4 when
+# ownership returns here.
+MANAGE_CAMERA="${MANAGE_CAMERA:-0}"
+
 # 3) Camera: go2rtc up and pi_cam has a producer?
-if systemctl cat go2rtc.service >/dev/null 2>&1; then
+if [ "$MANAGE_CAMERA" = "1" ] && systemctl cat go2rtc.service >/dev/null 2>&1; then
     if ! systemctl is-active --quiet go2rtc; then
         LOG "go2rtc not active -> restart"
         sudo systemctl restart go2rtc
@@ -63,7 +71,7 @@ fi
 
 # 4) Tailscale Funnel: is the public URL actually reachable and mapped to :1984?
 #    (the oneshot funnel unit can fail at boot if tailscaled isn't online yet)
-if command -v tailscale >/dev/null; then
+if [ "$MANAGE_CAMERA" = "1" ] && command -v tailscale >/dev/null; then
     if ! tailscale serve status 2>/dev/null | grep -q '127.0.0.1:1984'; then
         LOG "funnel mapping missing -> re-applying"
         sudo tailscale serve reset 2>/dev/null || true
