@@ -66,7 +66,6 @@ const UI = {
     aiService: document.getElementById('ai-service'),
 
     // Camera & Controls
-    selectCameraMode: document.getElementById('select-camera-mode'),
     btnEstop: document.getElementById('btn-estop'),
 
     // Log panel collapsible
@@ -104,7 +103,6 @@ const UI = {
     nb2UnlockBadge: document.getElementById('nb2-unlock-badge'),
     nb2UnlockCountdown: document.getElementById('nb2-unlock-countdown'),
     nb2UnlockTimer: document.getElementById('nb2-unlock-timer'),
-    btnHardOff: document.getElementById('btn-hard-off'),
 };
 
 // ============================================================================
@@ -682,7 +680,6 @@ function flushTelemetryToDOM() {
         // Enable/disable breaker control buttons based on connection
         if (UI.btnNb2On) UI.btnNb2On.disabled = !HW.connected || !TEL.nb2Rs485Ok;
         if (UI.btnNb2Off) UI.btnNb2Off.disabled = !HW.connected || !TEL.nb2Rs485Ok;
-        if (UI.btnHardOff) UI.btnHardOff.disabled = !HW.connected || !TEL.nb2Rs485Ok;
 
         TEL.dirty = false;
     }
@@ -744,10 +741,10 @@ function updateHwBadge(connected) {
     }
     const btnMqttModel = document.getElementById('btn-mqtt-connect-model');
     if (btnMqttModel) {
-        btnMqttModel.textContent = connected ? 'Disconnect' : 'Connect Hardware';
-        btnMqttModel.style.borderColor = connected ? 'var(--danger)' : 'var(--primary)';
-        btnMqttModel.style.color = connected ? 'var(--danger)' : 'var(--primary)';
+        btnMqttModel.textContent = connected ? 'Disconnect Hardware' : 'Connect Hardware';
+        btnMqttModel.className = connected ? 'btn btn--danger' : 'btn btn--primary';
     }
+    if (window.updateHwSummary) window.updateHwSummary();
 }
 
 // ── UI Control Gating ────────────────────────────────────────────────────────
@@ -1365,9 +1362,9 @@ function breakerOn() {
     addLog('[NB2] Remote CLOSE (breaker ON) command sent.', 'info');
 }
 
-async function breakerOff({ estopFirst = false, label = 'panel' } = {}) {
+async function breakerOff({ estopFirst = true, label = 'panel' } = {}) {
     if (!HW.connected) { addLog('[NB2] Not connected — breaker OFF NOT sent.', 'warning'); return; }
-    if (!confirm('⚠️ BREAKER OFF\n\nOpening the breaker cuts AC power to the ENTIRE station — motor, sensors and all field equipment de-energise immediately.\n\nProceed only if the line is stopped and it is safe to do so.')) return;
+    if (!confirm('⚠️ BREAKER OFF\n\nThe motor will be E-STOPPED, then the breaker opens — cutting AC power to the ENTIRE station. Motor, sensors and all field equipment de-energise immediately.\n\nProceed only if it is safe to do so.')) return;
     const key = window.prompt('Enter the breaker passphrase to confirm power cut:');
     if (!key) { addLog('[NB2] Breaker OFF cancelled — no passphrase.', 'info'); return; }
     if (estopFirst) {
@@ -1398,11 +1395,6 @@ if (btnNb2OnModel) btnNb2OnModel.addEventListener('click', breakerOn);
 if (UI.btnNb2Off) UI.btnNb2Off.addEventListener('click', () => breakerOff({ label: 'panel' }));
 const btnNb2OffModel = document.getElementById('btn-nb2-off-model');
 if (btnNb2OffModel) btnNb2OffModel.addEventListener('click', () => breakerOff({ label: 'panel' }));
-
-// HARD POWER CUT — e-stop the motor first, then trip the breaker
-if (UI.btnHardOff) {
-    UI.btnHardOff.addEventListener('click', () => breakerOff({ estopFirst: true, label: 'hard-cut' }));
-}
 
 
 
@@ -2216,26 +2208,9 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
         });
     }
 
-    // -------------------------------------------------------------------------
-    // CAMERA MODE SELECT
-    // -------------------------------------------------------------------------
-    if (UI.selectCameraMode) {
-        UI.selectCameraMode.addEventListener('change', (e) => {
-            SIM.cameraMode = e.target.value;
-            if (SIM.cameraMode === 'orbit') {
-                animateCameraTarget(camera, BABYLON.Vector3.Zero(), scene);
-                BABYLON.Animation.CreateAndStartAnimation(
-                    'animCamRadiusReset', camera, 'radius',
-                    60, 30, camera.radius, 2.2,
-                    BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT
-                );
-                addLog('Camera: Free Orbit.', 'info');
-
-            } else if (SIM.cameraMode === 'product') {
-                addLog('Camera: Product Follow — tracking lead package.', 'info');
-            }
-        });
-    }
+    // Camera Mode select removed: it offered one working option ("Free Orbit")
+    // and one permanently disabled one. The camera stays in orbit mode, which
+    // is SIM.cameraMode's default, so nothing needs to set it at runtime.
 
     // NOTE: btn-fault-motor/screw/belt/reset live exclusively in the Simulation
     // tab (Tab 3) and are owned entirely by sim_engine.js (simEngine.faults).
@@ -2644,10 +2619,6 @@ createScene().then(({ scene, kinematics, animationGroups }) => {
                         if (engine) {
                             engine.resize();
                         }
-                    }
-                    // Sync camera mode
-                    if (UI.selectCameraMode) {
-                        SIM.cameraMode = UI.selectCameraMode.value;
                     }
                 } else {
                     if (canvasElement) {
@@ -3568,3 +3539,50 @@ const CAM = {
         ];
     },
 };
+
+// ============================================================================
+// HARDWARE STATUS SUMMARY (Tab 2)
+// Six rows that mostly read "Disconnected" cost six times the space of the one
+// bit an operator actually needs. The rows still exist — they are just folded
+// behind a single health chip until asked for.
+//
+// The chip derives its state from the pills themselves rather than from a
+// parallel copy of the connection state, so it cannot drift out of sync with
+// whatever last wrote them.
+// ============================================================================
+(function initHwSummary() {
+    const summary = document.getElementById('hw-summary');
+    const detail = document.getElementById('hw-detail');
+    const countEl = document.getElementById('hw-summary-count');
+    if (!summary || !detail || !countEl) return;
+
+    const pillIds = [
+        'status-esp32', 'status-motor', 'status-proximity',
+        'status-temp', 'status-breaker', 'status-rs485',
+    ];
+    const pills = pillIds.map(id => document.getElementById(id)).filter(Boolean);
+
+    window.updateHwSummary = function updateHwSummary() {
+        let ok = 0, warn = 0;
+        for (const el of pills) {
+            if (el.classList.contains('status-healthy')) ok++;
+            else if (el.classList.contains('status-warning')) warn++;
+        }
+        countEl.textContent = `${ok} / ${pills.length} online`;
+        summary.dataset.health = ok === pills.length ? 'ok' : (ok > 0 || warn > 0 ? 'warn' : 'bad');
+    };
+
+    summary.addEventListener('click', () => {
+        const open = summary.getAttribute('aria-expanded') === 'true';
+        summary.setAttribute('aria-expanded', String(!open));
+        detail.hidden = open;
+    });
+
+    // The pills are written from several places (telemetry flush, connect/
+    // disconnect, staleness). Observing them is simpler and more reliable than
+    // finding and patching every writer.
+    const obs = new MutationObserver(() => window.updateHwSummary());
+    for (const el of pills) obs.observe(el, { attributes: true, attributeFilter: ['class'] });
+
+    window.updateHwSummary();
+})();
