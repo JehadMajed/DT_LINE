@@ -3294,7 +3294,16 @@ const CAM = {
         // for the real Safari/iOS case where hls.js can't run at all
         // (no MediaSource Extensions).
         if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-            const hls = new Hls({ liveSyncDurationCount: 3 });
+            // 3 segments (~9s buffer) was tuned for staying close to live, but
+            // that's a thin margin for a remote viewer with real round-trip
+            // latency to Cloudflare's edge - if one segment fetch takes a bit
+            // longer than usual, playback catches up to its own download
+            // point and stalls. Reported live: works great on the local
+            // network, noticeably weaker over the public internet - this is
+            // that margin being too tight, not a bitrate/quality problem.
+            // 6 segments (~18s) trades a few more seconds behind live for
+            // real slack against latency variance.
+            const hls = new Hls({ liveSyncDurationCount: 6, maxBufferLength: 20 });
             this.hls = hls;
             hls.loadSource(CAM_HLS_URL);
             hls.attachMedia(this.video);
