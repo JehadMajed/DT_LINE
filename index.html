@@ -255,10 +255,11 @@
                                     <div class="camfeed-viewport" id="camfeed-viewport">
                                         <div id="cam-zoom-wrapper"
                                             style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; transform-origin: center center; overflow:hidden;">
-                                            <!-- Native player, WebRTC primary with an HLS fallback (see CAM in
-                                                 app.js). Owning playback directly - no iframe - is what makes real
-                                                 latency measurement possible via getStats(), and lets the fallback
-                                                 use a genuinely different transport instead of the same one. -->
+                                            <!-- HLS player (see CAM in app.js). WebRTC was removed entirely - it
+                                                 requires sustained real-time delivery with zero tolerance for
+                                                 congestion, which this connection (~2 Mbps upload, CGNAT) can't
+                                                 reliably provide. HLS is chunked over plain HTTP with a buffer
+                                                 that absorbs hiccups instead of fighting them in real time. -->
                                             <video id="cam-feed-video" class="cam-video hidden" autoplay playsinline
                                                 muted></video>
                                         </div>
@@ -877,12 +878,11 @@
     <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-    <!-- HLS fallback for the camera feed when native WebRTC can't connect
-         (chunked-over-HTTP survives network conditions WebRTC doesn't).
-         Chrome/Firefox/Edge need this; Safari/iOS play HLS natively and CAM
-         skips it there (see CAM.startHls() in app.js). -->
+    <!-- HLS playback for the camera feed. Chrome/Firefox/Edge need this;
+         Safari/iOS play HLS natively and CAM skips it there
+         (see CAM.startHls() in app.js). -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
-    <script src="app.js?v=22"></script>
+    <script src="app.js?v=23"></script>
     <script src="sim_engine.js?v=4"></script>
 
 </body>

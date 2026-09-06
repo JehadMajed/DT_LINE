@@ -2792,9 +2792,9 @@ const camPanRight = document.getElementById("cam-pan-right");
 
 const camZoomWrapper = document.getElementById("cam-zoom-wrapper");
 const camfeedViewport = document.getElementById("camfeed-viewport");
-// The feed is a plain <video> now (WebRTC or HLS, both native), so it just
-// fills #cam-zoom-wrapper via .cam-video's own CSS - no iframe-scaling hack
-// needed (see CAM_WHEP_URL / CAM_HLS_URL below).
+// The feed is a plain <video> playing HLS, so it just fills #cam-zoom-wrapper
+// via .cam-video's own CSS - no iframe-scaling hack needed (see CAM_HLS_URL
+// below).
 
 function clampPan() {
     if (camZoom <= 1.0) {
@@ -3239,136 +3239,43 @@ else DTX.init();
 
 
 // ============================================================================
-// NATIVE WEBRTC CAMERA PLAYER, WITH A GENUINELY DIFFERENT FALLBACK
-// The feed used to be a cross-origin iframe, which is a black box: it hides
-// RTCPeerConnection.getStats() entirely, so the delay a researcher actually
-// experiences could not be measured at all - only inferred from frame-delivery
-// rates, which measure throughput rather than latency.
+// HLS CAMERA PLAYER
+// WebRTC was removed entirely (not just de-prioritized behind a fallback).
+// It requires sustained real-time delivery with zero tolerance for
+// congestion, which does not fit this network: ~2 Mbps measured upload, no
+// public IP (CGNAT, so every viewer already relays through Cloudflare
+// regardless). Confirmed live, repeatedly: on a lossy path WebRTC's own
+// retransmission logic can inflate real bandwidth use 8-10x trying to keep
+// up in real time (336MB sent for what should have been an ~30MB stream),
+// which saturates the uplink further and cascades - and it did this while
+// connectionState still reported "connected", so nothing in the protocol
+// itself flagged the failure.
 //
-// Owning the peer connection here gives, per viewer and with no site access:
-// jitter-buffer delay, round-trip time, the ICE candidate type actually in use
-// (host / srflx / relay), freezes and dropped frames.
-//
-// Signalling goes over HTTPS through the Cloudflare Tunnel (WHEP) to MediaMTX.
-// Media goes over UDP - direct, srflx, or relayed through Cloudflare's TURN
-// service when the network requires it.
-//
-// The fallback used to be the same MediaMTX WebRTC page in an iframe - i.e.
-// the same transport, so it failed for the same reasons (carrier NAT
-// rebinding, cellular jitter) at the same time as the primary. HLS is a
-// genuinely different transport: chunked over plain HTTP, so a network
-// hiccup just means the next segment is a little late, not a dead
-// PeerConnection. It costs a few seconds of latency in exchange for
-// surviving exactly the conditions WebRTC doesn't.
+// HLS has none of that: it's chunked, plain HTTP, with a few seconds of
+// buffer that absorbs a network hiccup instead of fighting it in real time.
+// Slower to start, a few seconds behind live - and it survives exactly the
+// conditions that kept breaking WebRTC on this connection.
 // ============================================================================
-const CAM_WHEP_URL = 'https://cam.83838737rufhfhfucjfjdi8fi39.shop/cam/whep';
 const CAM_HLS_URL = 'https://cam-h1s.83838737rufhfhfucjfjdi8fi39.shop/cam/index.m3u8';
 
 const CAM = {
-    pc: null,
     hls: null,
     video: null,
-    statsTimer: null,
-    active: false,              // true once native WebRTC is actually playing
-    hlsActive: false,           // true once the HLS fallback is actually playing
-    lastStats: null,
+    hlsHealthTimer: null,
+    hlsActive: false,           // true once the HLS stream is actually playing
     lastAutoRestart: 0,
     // Confirmed live: MediaMTX itself can crash on a broken source pipe and
-    // recovers via Restart=always in ~12s - but with a 5-minute cooldown,
-    // viewers caught by that blip sat dead for 5 minutes over a problem that
-    // was gone in 12 seconds. Retries now default to HLS (cheap for the
-    // server, not a fresh WebRTC handshake), so a short cooldown here isn't
-    // the restart-storm risk it would have been - 20s clears a transient
-    // blip fast without hammering a genuinely persistent outage.
+    // recovers via Restart=always in ~12s - a long cooldown here would leave
+    // viewers caught by that blip sitting dead far longer than the outage
+    // itself lasted. Restarts are cheap (just re-loading the HLS source, no
+    // handshake), so a short cooldown isn't a storm risk - 20s clears a
+    // transient blip fast without hammering a genuinely persistent outage.
     AUTORESTART_COOLDOWN_MS: 20000,
-    SETUP_TIMEOUT_MS: 12000,
 
-    async start() {
+    start() {
         this.video = document.getElementById('cam-feed-video');
         if (!this.video) return;
-
         this.stop(true);
-        try {
-            const pc = new RTCPeerConnection({
-                // MediaMTX advertises its own srflx/relay (TURN) candidates, so the
-                // browser could offer host candidates only. But the Pi sits behind
-                // carrier-grade NAT, and giving the browser its own srflx candidates
-                // lets ICE pair from either side rather than depending on one
-                // direction succeeding. Costs one STUN round trip at setup.
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun.cloudflare.com:3478' },
-                ],
-                bundlePolicy: 'max-bundle',
-            });
-            this.pc = pc;
-            pc.addTransceiver('video', { direction: 'recvonly' });
-
-            pc.ontrack = (e) => {
-                if (e.track.kind !== 'video') return;
-                this.video.srcObject = e.streams[0];
-                this.video.play().catch(() => { /* muted, so autoplay should pass */ });
-            };
-            pc.onconnectionstatechange = () => {
-                if (this.pc !== pc) return;
-                const st = pc.connectionState;
-                if (st === 'connected') this.onConnected();
-                else if (st === 'failed' || st === 'closed') this.fallback('peer connection ' + st);
-            };
-
-            await pc.setLocalDescription(await pc.createOffer());
-            await this.waitForIce(pc);
-
-            // MediaMTX's WHEP endpoint: POST the raw SDP offer, get the raw SDP
-            // answer back directly in the response body (not JSON).
-            const res = await fetch(CAM_WHEP_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/sdp' },
-                body: pc.localDescription.sdp,
-            });
-            if (!res.ok) throw new Error('signalling HTTP ' + res.status);
-            const answerSdp = await res.text();
-            if (!answerSdp) throw new Error('signalling returned no SDP');
-            await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-
-            // Never leave a black rectangle on screen if the connection stalls.
-            setTimeout(() => { if (!this.active) this.fallback('setup timed out'); }, this.SETUP_TIMEOUT_MS);
-        } catch (e) {
-            this.fallback(e.message);
-        }
-    },
-
-    // Gather ICE for a bounded time; MediaMTX wants the candidates inside the offer.
-    waitForIce(pc) {
-        return new Promise(resolve => {
-            if (pc.iceGatheringState === 'complete') return resolve();
-            const done = () => { pc.removeEventListener('icegatheringstatechange', check); resolve(); };
-            const check = () => { if (pc.iceGatheringState === 'complete') done(); };
-            pc.addEventListener('icegatheringstatechange', check);
-            setTimeout(done, 3000);
-        });
-    },
-
-    onConnected() {
-        this.active = true;
-        this.hlsActive = false;
-        if (this.hls) { try { this.hls.destroy(); } catch (e) { } this.hls = null; }
-        this.video.classList.remove('hidden');
-        if (typeof DTX !== 'undefined') DTX.setCamStatus('', 'ok');
-        addLog('Camera: native WebRTC connected - latency is now measurable.', 'success');
-        if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_webrtc_connected' });
-        clearInterval(this.statsTimer);
-        this.statsTimer = setInterval(() => this.pollStats(), 2000);
-    },
-
-    // WebRTC failed - drop to HLS, a genuinely different transport (see header
-    // comment). If HLS also fails, escalate through the cooldown-gated
-    // restart below so the two paths can't loop off each other indefinitely.
-    fallback(reason) {
-        if (this.active) return;                 // already playing; ignore late errors
-        this.stop(true);
-        addLog('Camera: WebRTC unavailable (' + reason + ') - falling back to HLS.', 'warning');
-        if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_webrtc_fallback', reason: reason });
         this.startHls();
     },
 
@@ -3421,7 +3328,7 @@ const CAM = {
         }
 
         if (typeof DTX !== 'undefined') DTX.setCamStatus('Camera unavailable', 'bad');
-        this.scheduleAutoRestart('no HLS support', true);
+        this.scheduleAutoRestart('no HLS support');
     },
 
     // play() at MANIFEST_PARSED time can silently fail or get interrupted
@@ -3464,19 +3371,10 @@ const CAM = {
         }, 3000);
     },
 
-    // Both transports report failure through here. Cooldown-gated so a
-    // network that's down for minutes doesn't turn into a restart storm.
-    //
-    // Retries HLS again by default, NOT native WebRTC. Confirmed live: once
-    // WebRTC has already proven unreliable under current conditions (e.g.
-    // several simultaneous viewers saturating the uplink - MediaMTX's
-    // "write queue is full"), racing straight back to WebRTC on every
-    // recovery just re-hits the same bandwidth ceiling and fails again,
-    // producing exactly the "peer connection closed, retrying" loop this
-    // was supposed to fix. Only the very first connection attempt (start())
-    // and this function's own "no HLS support at all" caller should ever
-    // pass retryWebRtc=true.
-    scheduleAutoRestart(reason, retryWebRtc) {
+    // Cooldown-gated so a network that's down for minutes doesn't turn into
+    // a restart storm. Always retries HLS - there is no other transport to
+    // fall back to.
+    scheduleAutoRestart(reason) {
         const now = Date.now();
         if (now - this.lastAutoRestart < this.AUTORESTART_COOLDOWN_MS) return;
         this.lastAutoRestart = now;
@@ -3486,7 +3384,7 @@ const CAM = {
             DTX.record('event', { event: 'camera_restart', manual: false });
         }
         addLog('Camera feed unreachable (' + reason + ') - auto-restarting.', 'warning');
-        setTimeout(() => { retryWebRtc ? this.start() : this.startHls(); }, 1000);
+        setTimeout(() => this.startHls(), 1000);
     },
 
     // Manual restart, wired to the operator's Restart button.
@@ -3498,151 +3396,22 @@ const CAM = {
         }
         this.lastAutoRestart = Date.now();   // also resets the auto-restart cooldown
         this.stop(true);
-        this.start();
+        this.startHls();
     },
 
     stop(quiet) {
-        clearInterval(this.statsTimer); this.statsTimer = null;
         clearInterval(this.hlsHealthTimer); this.hlsHealthTimer = null;
-        this.active = false;
         this.hlsActive = false;
-        this._lastJBDelay = null;
-        this._lastJBCount = null;
-        this.badBufferStreak = 0;
-        this.stallStreak = 0;
         this.hlsStallStreak = 0;
-        if (this.pc) { try { this.pc.close(); } catch (e) { } this.pc = null; }
         if (this.hls) { try { this.hls.destroy(); } catch (e) { } this.hls = null; }
         if (this.video) { this.video.srcObject = null; this.video.removeAttribute('src'); }
         if (!quiet) addLog('Camera: stopped.', 'info');
     },
 
-    // Consecutive polls with a pathologically high buffer before forcing a
-    // restart. A connection can be "connected" per WebRTC's own state machine
-    // while its actual path is lossy enough to be unwatchable - retransmits
-    // pile up, the buffer grows without bound, and connectionState never
-    // reports anything is wrong. Nothing short of watching the buffer itself
-    // catches that.
-    BAD_BUFFER_MS: 1200,
-    BAD_BUFFER_STREAK_LIMIT: 3,
-    STALL_STREAK_LIMIT: 3,
-    badBufferStreak: 0,
-    stallStreak: 0,
-
-    // The measurement the old iframe made impossible.
-    async pollStats() {
-        if (!this.pc) return;
-        let report;
-        try { report = await this.pc.getStats(); } catch (e) { return; }
-
-        const s = { bufferMs: null, rttMs: null, candidate: null, fps: null, freezes: null, dropped: null };
-        let pairId = null;
-        let framesDelta = null;   // new frames emitted since the last poll; null until the 2nd poll
-
-        report.forEach(r => {
-            if (r.type === 'inbound-rtp' && r.kind === 'video') {
-                // jitterBufferDelay/jitterBufferEmittedCount are lifetime-cumulative,
-                // so dividing them straight gives a running average that can only
-                // climb and stops reflecting anything current after a couple of
-                // minutes. Diffing against the previous poll instead gives the mean
-                // buffer delay for just the last ~2s - a live reading, and the right
-                // signal to react to.
-                if (r.jitterBufferEmittedCount > 0) {
-                    const prevDelay = this._lastJBDelay;
-                    const prevCount = this._lastJBCount;
-                    this._lastJBDelay = r.jitterBufferDelay;
-                    this._lastJBCount = r.jitterBufferEmittedCount;
-                    if (prevCount != null) {
-                        const dCount = r.jitterBufferEmittedCount - prevCount;
-                        const dDelay = r.jitterBufferDelay - prevDelay;
-                        framesDelta = dCount;
-                        if (dCount > 0) s.bufferMs = (dDelay / dCount) * 1000;
-                    }
-                }
-                s.fps = (r.framesPerSecond !== undefined) ? r.framesPerSecond : null;
-                s.freezes = (r.freezeCount !== undefined) ? r.freezeCount : null;
-                s.dropped = (r.framesDropped !== undefined) ? r.framesDropped : null;
-            }
-            if (r.type === 'transport' && r.selectedCandidatePairId) pairId = r.selectedCandidatePairId;
-            if (r.type === 'candidate-pair' && (r.selected || r.state === 'succeeded')) {
-                if (r.currentRoundTripTime != null) s.rttMs = r.currentRoundTripTime * 1000;
-                if (!pairId) pairId = r.id;
-            }
-        });
-
-        report.forEach(r => {
-            if (r.type === 'candidate-pair' && r.id === pairId && r.remoteCandidateId) {
-                const rc = report.get(r.remoteCandidateId);
-                // host = same network, srflx = NAT traversal worked, relay = TURN in use.
-                if (rc) s.candidate = rc.candidateType;
-            }
-        });
-
-        this.lastStats = s;
-
-        // A full stall (zero new frames between polls) leaves bufferMs at null,
-        // since there is no delta to compute one from - the exact case the
-        // buffer-growth check below can never see, and the worst one: a frozen
-        // picture, not just a laggy one.
-        if (framesDelta != null && framesDelta <= 0) {
-            this.stallStreak++;
-            this.badBufferStreak = 0;
-            if (this.stallStreak >= this.STALL_STREAK_LIMIT) {
-                this.stallStreak = 0;
-                this.active = false;
-                this.stop(true);
-                addLog('Camera: WebRTC connected but no new frames for ~'
-                     + (this.STALL_STREAK_LIMIT * 2) + 's - stream is frozen. Falling back to HLS.', 'warning');
-                if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_webrtc_stalled' });
-                this.startHls();
-            }
-            return;
-        }
-        this.stallStreak = 0;
-
-        if (s.bufferMs != null && s.bufferMs > this.BAD_BUFFER_MS) {
-            this.badBufferStreak++;
-            if (this.badBufferStreak >= this.BAD_BUFFER_STREAK_LIMIT) {
-                this.badBufferStreak = 0;
-                this.active = false;   // so fallback() doesn't ignore this as a late error
-                this.stop(true);
-                addLog('Camera: WebRTC connected but buffer stuck at ' + Math.round(s.bufferMs)
-                     + 'ms - path is bad despite being "connected". Falling back to HLS.', 'warning');
-                if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_webrtc_degraded', bufferMs: Math.round(s.bufferMs) });
-                this.startHls();
-            }
-        } else if (s.bufferMs != null) {
-            this.badBufferStreak = 0;
-        }
-    },
-
-    // One-way estimate: jitter buffer plus half the round trip. Decode and render
-    // are excluded, so treat it as a floor rather than true glass-to-glass.
-    latencyMs() {
-        const s = this.lastStats;
-        if (!s || s.bufferMs == null) return null;
-        return s.bufferMs + (s.rttMs != null ? s.rttMs / 2 : 0);
-    },
-
     // Rows for the health panel.
     healthRows() {
-        if (this.hlsActive) return [['Camera', 'HLS fallback (no latency stats)', true]];
-        if (!this.active) return [['Camera', 'reconnecting…', true]];
-        const s = this.lastStats;
-        if (!s) return [['Camera', 'WebRTC, measuring…', false]];
-        const lat = this.latencyMs();
-        const path = s.candidate === 'relay' ? 'relay (TURN)'
-            : s.candidate === 'srflx' ? 'direct via NAT'
-                : s.candidate === 'host' ? 'direct (same network)'
-                    : (s.candidate || 'unknown');
-        return [
-            ['Camera path', path, s.candidate === 'relay'],
-            ['Camera latency', lat == null ? '—' : Math.round(lat) + ' ms', lat != null && lat > 800],
-            ['Camera buffer', s.bufferMs == null ? '—' : Math.round(s.bufferMs) + ' ms', s.bufferMs > 600],
-            ['Camera RTT', s.rttMs == null ? '—' : Math.round(s.rttMs) + ' ms', s.rttMs > 300],
-            ['Camera fps', s.fps == null ? '—' : s.fps, s.fps != null && s.fps < 8],
-            ['Camera freezes', s.freezes == null ? '—' : s.freezes, s.freezes > 0],
-        ];
+        if (this.hlsActive) return [['Camera', 'live (HLS)', false]];
+        return [['Camera', 'reconnecting…', true]];
     },
 };
 
