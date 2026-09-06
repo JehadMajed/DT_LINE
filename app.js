@@ -3390,6 +3390,7 @@ const CAM = {
                 this.hlsActive = true;
                 if (typeof DTX !== 'undefined') DTX.setCamStatus('', 'ok');
                 addLog('Camera: HLS fallback playing.', 'info');
+                this.startHlsHealthCheck();
             });
             hls.on(Hls.Events.ERROR, (event, data) => {
                 if (!data.fatal) return;
@@ -3408,20 +3409,45 @@ const CAM = {
             this.video.play().catch(() => { });
             this.hlsActive = true;
             if (typeof DTX !== 'undefined') DTX.setCamStatus('', 'ok');
-            // Native playback has no error/success event wired up here, so a
-            // silent failure would otherwise never recover. Give it a moment
-            // to actually start, then verify.
-            setTimeout(() => {
-                if (this.hlsActive && (this.video.error || this.video.readyState < 2)) {
-                    this.hlsActive = false;
-                    this.scheduleAutoRestart('native HLS failed to start');
-                }
-            }, 5000);
+            this.startHlsHealthCheck();
             return;
         }
 
         if (typeof DTX !== 'undefined') DTX.setCamStatus('Camera unavailable', 'bad');
         this.scheduleAutoRestart('no HLS support');
+    },
+
+    // play() at MANIFEST_PARSED time can silently fail or get interrupted
+    // before segments are actually buffered - confirmed live: the video sat
+    // fully loaded (readyState 4, no error) but paused at currentTime 0
+    // forever, because nothing ever retried it or noticed. This polls actual
+    // playback progress, retries play() if paused, and escalates to the same
+    // restart path as a hard error if the currentTime genuinely won't move.
+    HLS_STALL_STREAK_LIMIT: 3,
+    hlsStallStreak: 0,
+    startHlsHealthCheck() {
+        clearInterval(this.hlsHealthTimer);
+        this._lastHlsTime = -1;
+        this.hlsStallStreak = 0;
+        this.hlsHealthTimer = setInterval(() => {
+            if (!this.hlsActive || !this.video) return;
+            if (this.video.paused) {
+                this.video.play().catch(() => { });
+            }
+            if (this.video.currentTime > this._lastHlsTime) {
+                this._lastHlsTime = this.video.currentTime;
+                this.hlsStallStreak = 0;
+                return;
+            }
+            this.hlsStallStreak++;
+            if (this.hlsStallStreak >= this.HLS_STALL_STREAK_LIMIT) {
+                this.hlsStallStreak = 0;
+                this.hlsActive = false;
+                addLog('Camera: HLS fallback stopped advancing - restarting.', 'warning');
+                if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_hls_stalled' });
+                this.scheduleAutoRestart('HLS stalled');
+            }
+        }, 3000);
     },
 
     // Both transports report failure through here. Cooldown-gated so a
@@ -3453,12 +3479,14 @@ const CAM = {
 
     stop(quiet) {
         clearInterval(this.statsTimer); this.statsTimer = null;
+        clearInterval(this.hlsHealthTimer); this.hlsHealthTimer = null;
         this.active = false;
         this.hlsActive = false;
         this._lastJBDelay = null;
         this._lastJBCount = null;
         this.badBufferStreak = 0;
         this.stallStreak = 0;
+        this.hlsStallStreak = 0;
         if (this.pc) { try { this.pc.close(); } catch (e) { } this.pc = null; }
         if (this.hls) { try { this.hls.destroy(); } catch (e) { } this.hls = null; }
         if (this.video) { this.video.srcObject = null; this.video.removeAttribute('src'); }
