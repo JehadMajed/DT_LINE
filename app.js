@@ -3294,16 +3294,19 @@ const CAM = {
         // for the real Safari/iOS case where hls.js can't run at all
         // (no MediaSource Extensions).
         if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-            // 3 segments (~9s buffer) was tuned for staying close to live, but
-            // that's a thin margin for a remote viewer with real round-trip
-            // latency to Cloudflare's edge - if one segment fetch takes a bit
-            // longer than usual, playback catches up to its own download
-            // point and stalls. Reported live: works great on the local
-            // network, noticeably weaker over the public internet - this is
-            // that margin being too tight, not a bitrate/quality problem.
-            // 6 segments (~18s) trades a few more seconds behind live for
-            // real slack against latency variance.
-            const hls = new Hls({ liveSyncDurationCount: 6, maxBufferLength: 20 });
+            // History: 3 segments (~9s) once caused remote viewers to stall
+            // (their round-trip latency to Cloudflare's edge could exceed a
+            // fetch cycle, so playback caught up to its own download point).
+            // Raising this to 6 segments (~18s) fixed that, but made the feed
+            // feel too far from real-time for this deployment - deliberately
+            // brought back down to 3 (~9s target-behind-live) as the chosen
+            // trade-off. maxBufferLength stays at 20 (not reduced with it):
+            // it's a forward-buffer ceiling, not the live-edge target, so it
+            // still gives a slow segment fetch room to recover without
+            // forcing a bigger steady-state delay. If remote stalling
+            // reappears, raise liveSyncDurationCount again before anything
+            // else - this exact parameter is the known lever for it.
+            const hls = new Hls({ liveSyncDurationCount: 3, maxBufferLength: 20 });
             this.hls = hls;
             hls.loadSource(CAM_HLS_URL);
             hls.attachMedia(this.video);
