@@ -3369,38 +3369,59 @@ const CAM = {
         if (!this.video) return;
         if (this.hls) { try { this.hls.destroy(); } catch (e) { } this.hls = null; }
 
+        // hls.js first, whenever it says it can run here - that's the standard,
+        // reliable pattern (it's what hls.js's own docs recommend). The inverse
+        // - trusting canPlayType('application/vnd.apple.mpegurl') as a signal
+        // that native playback will actually WORK - is not safe: it returned
+        // truthy on a non-Safari browser here, which then tried to demux an
+        // HLS playlist as a plain video file and failed outright
+        // (DEMUXER_ERROR_COULD_NOT_PARSE), with nothing watching that path to
+        // recover from it. Native <video src> is now strictly the fallback,
+        // for the real Safari/iOS case where hls.js can't run at all
+        // (no MediaSource Extensions).
+        if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+            const hls = new Hls({ liveSyncDurationCount: 3 });
+            this.hls = hls;
+            hls.loadSource(CAM_HLS_URL);
+            hls.attachMedia(this.video);
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                this.video.classList.remove('hidden');
+                this.video.play().catch(() => { });
+                this.hlsActive = true;
+                if (typeof DTX !== 'undefined') DTX.setCamStatus('', 'ok');
+                addLog('Camera: HLS fallback playing.', 'info');
+            });
+            hls.on(Hls.Events.ERROR, (event, data) => {
+                if (!data.fatal) return;
+                this.hlsActive = false;
+                if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_hls_error', reason: data.type });
+                this.scheduleAutoRestart('HLS ' + data.type);
+            });
+            return;
+        }
+
         if (this.video.canPlayType('application/vnd.apple.mpegurl')) {
-            // Safari/iOS play HLS natively - no library needed.
+            // True Safari/iOS: no MediaSource Extensions, so hls.js can't run,
+            // but the browser plays HLS natively.
             this.video.src = CAM_HLS_URL;
             this.video.classList.remove('hidden');
             this.video.play().catch(() => { });
             this.hlsActive = true;
             if (typeof DTX !== 'undefined') DTX.setCamStatus('', 'ok');
-            return;
-        }
-        if (typeof Hls === 'undefined' || !Hls.isSupported()) {
-            if (typeof DTX !== 'undefined') DTX.setCamStatus('Camera unavailable', 'bad');
-            this.scheduleAutoRestart('no HLS support');
+            // Native playback has no error/success event wired up here, so a
+            // silent failure would otherwise never recover. Give it a moment
+            // to actually start, then verify.
+            setTimeout(() => {
+                if (this.hlsActive && (this.video.error || this.video.readyState < 2)) {
+                    this.hlsActive = false;
+                    this.scheduleAutoRestart('native HLS failed to start');
+                }
+            }, 5000);
             return;
         }
 
-        const hls = new Hls({ liveSyncDurationCount: 3 });
-        this.hls = hls;
-        hls.loadSource(CAM_HLS_URL);
-        hls.attachMedia(this.video);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            this.video.classList.remove('hidden');
-            this.video.play().catch(() => { });
-            this.hlsActive = true;
-            if (typeof DTX !== 'undefined') DTX.setCamStatus('', 'ok');
-            addLog('Camera: HLS fallback playing.', 'info');
-        });
-        hls.on(Hls.Events.ERROR, (event, data) => {
-            if (!data.fatal) return;
-            this.hlsActive = false;
-            if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_hls_error', reason: data.type });
-            this.scheduleAutoRestart('HLS ' + data.type);
-        });
+        if (typeof DTX !== 'undefined') DTX.setCamStatus('Camera unavailable', 'bad');
+        this.scheduleAutoRestart('no HLS support');
     },
 
     // Both transports report failure through here. Cooldown-gated so a
