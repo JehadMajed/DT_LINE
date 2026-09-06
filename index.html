@@ -7,7 +7,7 @@
     <meta name="description"
         content="Industrial Digital Twin for a production-line conveyor system — real-time telemetry, 3D inspection, and simulation via Babylon.js.">
     <title>Digital Twin | Conveyor Production Line</title>
-    <link rel="stylesheet" href="style.css?v=12">
+    <link rel="stylesheet" href="style.css?v=14">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 
@@ -198,26 +198,23 @@
                                 <span class="model-chip live-chip">LIVE</span>
                                 <span class="model-title-text">3D Interactive Model</span>
                             </div>
-                            <div style="display:flex; gap:12px; align-items:center;">
-                                <button id="btn-mqtt-connect-model" class="cmd-btn"
-                                    style="width:auto;padding:0 12px;height:28px;font-size:12px;border-color:var(--primary);color:var(--primary);">Connect
-                                    Hardware</button>
-                                <span class="model-meta-text" id="model-state-badge">Standby</span>
-                            </div>
+                            <span class="model-meta-text" id="model-state-badge">Standby</span>
                         </div>
 
                         <!-- Babylon canvas shown here via JS -->
                         <div id="model-viewport-placeholder"
-                            style="position:relative; height:clamp(300px,calc(100vh - 320px),500px); background:var(--viewport-bg); display:flex; flex-direction:row; align-items:stretch; justify-content:center; border-bottom:1px solid var(--viewport-border); overflow:hidden;">
+                            style="position:relative; height:clamp(300px,calc(100dvh - 320px),500px); background:var(--viewport-bg); display:flex; flex-direction:row; align-items:stretch; justify-content:center; border-bottom:1px solid var(--viewport-border); overflow:hidden;">
 
-                            <div id="model-canvas-wrap" style="position:relative; flex:1 1 auto; min-width:0; height:100%; display:flex; align-items:center; justify-content:center;">
+                            <div id="model-canvas-wrap"
+                                style="position:relative; flex:1 1 auto; min-width:0; height:100%; display:flex; align-items:center; justify-content:center;">
                                 <span style="color:var(--text-muted);font-size:13px; z-index:0;">3D canvas renders
                                     here</span>
 
                                 <div class="viewer-overlay">
                                     <button class="overlay-chip" id="cam-show-btn"
                                         style="cursor: pointer; font-weight: 600; display: none; align-items: center; gap: 6px;">
-                                        <span style="display:inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--primary);"></span>
+                                        <span
+                                            style="display:inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--primary);"></span>
                                         <span class="oc-val" style="color: var(--primary);">Show Camera Feed</span>
                                     </button>
                                 </div>
@@ -229,23 +226,32 @@
                                     <div style="display:flex; align-items:center; gap:0.5rem;">
                                         <span class="camfeed-rec-dot" id="camfeed-rec-dot"></span>
                                         <span class="cam-overlay-badge">Live Optical Feed</span>
-                                        <span class="cam-overlay-status" id="cam-status-text" style="display:none;">Unavailable</span>
+                                        <span class="cam-overlay-status" id="cam-status-text"
+                                            style="display:none;">Unavailable</span>
                                     </div>
                                     <div style="display: flex; gap: 6px; margin-left: auto; align-items: center;">
-                                        <button class="cam-restart-btn" id="btn-cam-restart" title="Restart the live feed (reloads the stream)">
-                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                                        <button class="cam-restart-btn" id="btn-cam-restart"
+                                            title="Restart the live feed (reloads the stream)">
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                                                stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+                                                stroke-linejoin="round">
+                                                <path d="M23 4v6h-6" />
+                                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                                            </svg>
                                             <span>Restart</span>
                                         </button>
-                                        <button class="log-toggle" id="btn-camfeed-toggle" title="Hide Camera Feed" style="width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-muted); cursor:pointer;">
-                                            <svg id="camfeed-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none"
-                                                xmlns="http://www.w3.org/2000/svg">
+                                        <button class="log-toggle" id="btn-camfeed-toggle" title="Hide Camera Feed"
+                                            style="width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); color:var(--text-muted); cursor:pointer;">
+                                            <svg id="camfeed-chevron" width="12" height="12" viewBox="0 0 12 12"
+                                                fill="none" xmlns="http://www.w3.org/2000/svg">
                                                 <path d="M2 4L6 8L10 4" stroke="currentColor" stroke-width="1.5"
                                                     stroke-linecap="round" stroke-linejoin="round" />
                                             </svg>
                                         </button>
                                     </div>
                                 </div>
-                                <div id="camfeed-body" style="width:100%; display:flex; flex-direction:column; gap:0; flex-shrink:0;">
+                                <div id="camfeed-body"
+                                    style="width:100%; display:flex; flex-direction:column; gap:0; flex-shrink:0;">
                                     <div class="camfeed-viewport" id="camfeed-viewport">
                                         <div id="cam-zoom-wrapper"
                                             style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; transform-origin: center center; overflow:hidden;">
@@ -260,22 +266,55 @@
                                     <div class="camfeed-controls">
                                         <div class="camfeed-zoom-group">
                                             <button id="cam-zoom-in" class="cam-ctrl-btn" title="Zoom In">
-                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                                                    stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                                                    <circle cx="11" cy="11" r="8" />
+                                                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                                                    <line x1="11" y1="8" x2="11" y2="14" />
+                                                    <line x1="8" y1="11" x2="14" y2="11" />
+                                                </svg>
                                             </button>
                                             <div class="camfeed-zoom-track">
-                                                <div class="camfeed-zoom-fill" id="camfeed-zoom-fill" style="width:0%;"></div>
+                                                <div class="camfeed-zoom-fill" id="camfeed-zoom-fill" style="width:0%;">
+                                                </div>
                                             </div>
                                             <button id="cam-zoom-out" class="cam-ctrl-btn" title="Zoom Out">
-                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                                                    stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                                                    <circle cx="11" cy="11" r="8" />
+                                                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                                                    <line x1="8" y1="11" x2="14" y2="11" />
+                                                </svg>
                                             </button>
-                                            <button id="cam-zoom-reset" class="cam-ctrl-btn-sm" title="Reset Zoom">1:1</button>
+                                            <button id="cam-zoom-reset" class="cam-ctrl-btn-sm"
+                                                title="Reset Zoom">1:1</button>
                                         </div>
                                         <div class="camfeed-dpad">
-                                            <button id="cam-pan-up"    class="dpad-btn dpad-up"    title="Pan Up"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,7 5,3 8,7"/></svg></button>
-                                            <button id="cam-pan-left"  class="dpad-btn dpad-left"  title="Pan Left"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="7,2 3,5 7,8"/></svg></button>
+                                            <button id="cam-pan-up" class="dpad-btn dpad-up" title="Pan Up"><svg
+                                                    width="10" height="10" viewBox="0 0 10 10" fill="none"
+                                                    stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                                                    stroke-linejoin="round">
+                                                    <polyline points="2,7 5,3 8,7" />
+                                                </svg></button>
+                                            <button id="cam-pan-left" class="dpad-btn dpad-left" title="Pan Left"><svg
+                                                    width="10" height="10" viewBox="0 0 10 10" fill="none"
+                                                    stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                                                    stroke-linejoin="round">
+                                                    <polyline points="7,2 3,5 7,8" />
+                                                </svg></button>
                                             <div class="dpad-center"></div>
-                                            <button id="cam-pan-right" class="dpad-btn dpad-right" title="Pan Right"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3,2 7,5 3,8"/></svg></button>
-                                            <button id="cam-pan-down"  class="dpad-btn dpad-down"  title="Pan Down"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,3 5,7 8,3"/></svg></button>
+                                            <button id="cam-pan-right" class="dpad-btn dpad-right"
+                                                title="Pan Right"><svg width="10" height="10" viewBox="0 0 10 10"
+                                                    fill="none" stroke="currentColor" stroke-width="1.8"
+                                                    stroke-linecap="round" stroke-linejoin="round">
+                                                    <polyline points="3,2 7,5 3,8" />
+                                                </svg></button>
+                                            <button id="cam-pan-down" class="dpad-btn dpad-down" title="Pan Down"><svg
+                                                    width="10" height="10" viewBox="0 0 10 10" fill="none"
+                                                    stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                                                    stroke-linejoin="round">
+                                                    <polyline points="2,3 5,7 8,3" />
+                                                </svg></button>
                                         </div>
                                     </div>
                                 </div>
@@ -289,7 +328,8 @@
                                             style="font-size:12px; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted);">Component
                                             Inspector</span>
                                         <div style="display:flex; align-items:center; gap:8px;">
-                                            <span id="inspect-status" class="state-pill" style="font-size:10px;">--</span>
+                                            <span id="inspect-status" class="state-pill"
+                                                style="font-size:10px;">--</span>
                                             <button id="btn-close-inspector"
                                                 style="background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-size:20px; line-height:1; padding:0; margin:0; display:flex; align-items:center; justify-content:center; width:24px; height:24px;"
                                                 title="Hide Inspector">−</button>
@@ -299,7 +339,8 @@
                                         id="inspect-name">--</div>
                                     <div style="font-size:12px; color:var(--primary); font-weight:600; margin-bottom:12px;"
                                         id="inspect-category">--</div>
-                                    <div style="font-size:13px; color:var(--text); line-height:1.4;" id="inspect-specs">--
+                                    <div style="font-size:13px; color:var(--text); line-height:1.4;" id="inspect-specs">
+                                        --
                                     </div>
                                 </div>
                             </div>
@@ -322,58 +363,68 @@
                         <div id="cmd-status-strip" class="cmd-status-strip hidden"></div>
                         <!-- Raised when the device drops itself out of REMOTE mode -->
                         <div id="watchdog-alert" class="watchdog-alert hidden"></div>
-                        <div class="tele-strip">
-                            <div class="tele-item">
-                                <span class="tele-label">Motor RPM</span>
-                                <span class="tele-val"><span id="model-replica-rpm">--</span></span>
-                            </div>
-                            <div class="tele-item">
-                                <span class="tele-label">Belt Speed</span>
-                                <span class="tele-val"><span id="model-replica-speed">--</span> <span
-                                        class="tele-unit">m/s</span></span>
-                            </div>
-                            <div class="tele-item">
-                                <span class="tele-label">Proximity</span>
-                                <span class="tele-val" id="model-replica-prox">--</span>
-                            </div>
-                            <div class="tele-item">
-                                <span class="tele-label">Pieces Counted</span>
-                                <span class="tele-val" id="model-replica-count">0</span>
-                            </div>
-                            <!-- [TAB2-POWER] Voltage reading — shows NB2 breaker V when RS485 OK, else motor V -->
-                            <!-- To remove: delete this div and corresponding JS block in app.js [TAB2-POWER] -->
-                            <div class="tele-item">
-                                <span class="tele-label">Voltage</span>
-                                <span class="tele-val"><span id="model-replica-volt">—</span> <span
-                                        class="tele-unit">V</span></span>
-                            </div>
-                            <!-- [TAB2-POWER] Current reading — color turns amber above rated 1.2A -->
-                            <div class="tele-item">
-                                <span class="tele-label">Current</span>
-                                <span class="tele-val"><span id="model-replica-amp">—</span> <span
-                                        class="tele-unit">A</span></span>
-                            </div>
-                            <!-- [TAB2-POWER] Active power reading in kW -->
-                            <div class="tele-item">
-                                <span class="tele-label">Power</span>
-                                <span class="tele-val"><span id="model-replica-pwr">—</span> <span
-                                        class="tele-unit">kW</span></span>
-                            </div>
-                            <!-- [TAB2-POWER] Power-factor badge — color turns amber below 0.80 -->
-                            <div class="tele-item">
-                                <span class="tele-label">Power Factor</span>
-                                <span class="tele-val"><span id="model-replica-pf">—</span></span>
-                            </div>
-                            <!-- [TAB2-SPARKLINE] Mini voltage trend for last 10 readings -->
-                            <!-- To remove: delete this div and the [TAB2-SPARKLINE] block in app.js -->
-                            <div class="tele-item"
-                                style="flex-direction:column;align-items:flex-start;gap:4px;padding-top:8px;">
-                                <span class="tele-label" style="margin-bottom:2px;">Voltage Readings (last 10)</span>
-                                <canvas id="model-sparkline-volt" width="120" height="32"
-                                    style="border-radius:4px;background:rgba(2,132,199,0.05);display:block;"></canvas>
+                        <!-- Motion and electrical are two different systems and
+                             are read differently; they no longer share one flat strip. -->
+                        <div class="tele-group">
+                            <div class="tele-group-hd">Motion</div>
+                            <div class="tele-strip">
+                                <div class="tele-item">
+                                    <span class="tele-label">Motor RPM</span>
+                                    <span class="tele-val"><span id="model-replica-rpm">--</span></span>
+                                </div>
+                                <div class="tele-item">
+                                    <span class="tele-label">Belt Speed</span>
+                                    <span class="tele-val"><span id="model-replica-speed">--</span> <span
+                                            class="tele-unit">m/s</span></span>
+                                </div>
+                                <div class="tele-item">
+                                    <span class="tele-label">Proximity</span>
+                                    <span class="tele-val" id="model-replica-prox">--</span>
+                                </div>
+                                <div class="tele-item">
+                                    <span class="tele-label">Pieces Counted</span>
+                                    <span class="tele-val" id="model-replica-count">0</span>
+                                </div>
                             </div>
                         </div>
 
+                        <!-- [TAB2-POWER] Electrical group — NB2 breaker readings when
+                             RS485 is OK, else motor-side values. To remove: delete this
+                             tele-group and the [TAB2-POWER] block in app.js -->
+                        <div class="tele-group">
+                            <div class="tele-group-hd">Electrical</div>
+                            <div class="tele-strip">
+                                <div class="tele-item">
+                                    <span class="tele-label">Voltage</span>
+                                    <span class="tele-val"><span id="model-replica-volt">—</span> <span
+                                            class="tele-unit">V</span></span>
+                                </div>
+                                <!-- Current — colour turns amber above rated 1.2 A -->
+                                <div class="tele-item">
+                                    <span class="tele-label">Current</span>
+                                    <span class="tele-val"><span id="model-replica-amp">—</span> <span
+                                            class="tele-unit">A</span></span>
+                                </div>
+                                <div class="tele-item">
+                                    <span class="tele-label">Power</span>
+                                    <span class="tele-val"><span id="model-replica-pwr">—</span> <span
+                                            class="tele-unit">kW</span></span>
+                                </div>
+                                <!-- Power factor — colour turns amber below 0.80 -->
+                                <div class="tele-item">
+                                    <span class="tele-label">Power Factor</span>
+                                    <span class="tele-val"><span id="model-replica-pf">—</span></span>
+                                </div>
+                            </div>
+
+                            <!-- [TAB2-SPARKLINE] A chart, not a stat — it gets its own
+                                 row rather than masquerading as a tele-item.
+                                 To remove: delete this div and the [TAB2-SPARKLINE] block in app.js -->
+                            <div class="tele-chart">
+                                <span class="tele-chart-label">Voltage trend — last 10 readings</span>
+                                <canvas id="model-sparkline-volt" width="1000" height="64"></canvas>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Connection health + local recorder. Everything here is derived
@@ -382,8 +433,10 @@
                         <div class="model-hdr">
                             <span class="model-title-text" style="font-size:14px;">Connection Health</span>
                             <div style="display:flex;gap:6px;margin-left:auto;">
-                                <button id="btn-export-csv" class="cam-restart-btn" title="Export the recorded log as CSV">CSV</button>
-                                <button id="btn-export-json" class="cam-restart-btn" title="Export the recorded log as JSON">JSON</button>
+                                <button id="btn-export-csv" class="btn btn--ghost btn--auto"
+                                    title="Export the recorded log as CSV">CSV</button>
+                                <button id="btn-export-json" class="btn btn--ghost btn--auto"
+                                    title="Export the recorded log as JSON">JSON</button>
                             </div>
                         </div>
                         <div id="health-panel-body" class="health-panel"></div>
@@ -392,152 +445,144 @@
                 </div>
 
                 <!-- Right: Control Column -->
+                <!-- Right: Operator Console.
+                     Three groups in operating order — COMMAND (move the belt),
+                     POWER (energise / de-energise), CONNECTION (link + health).
+                     Monitoring no longer sits between two command groups, and
+                     E-STOP is docked outside the scroll area so it can never be
+                     scrolled out of reach. -->
                 <div class="model-col secondary-col">
                     <div class="control-column-card">
-                        <div class="control-section">
+                        <div class="control-section console">
+                            <div class="console-scroll">
 
-                            <div id="model-hw-banner" class="hidden"
-                                style="background:var(--warning-soft);border:1px solid var(--warning);border-radius:var(--radius-sm);padding:10px 12px;font-size:13px;color:var(--warning);margin-bottom:16px;">
-                                Hardware not connected. Use Connect button.
-                            </div>
-
-                            <!-- Speed Program -->
-                            <div class="ctrl-head" style="margin-bottom:14px;">
-                                <div>
-                                    <span class="panel-eyebrow">Motor Control</span>
-                                    <span class="ctrl-title">Speed Program</span>
+                                <div id="model-hw-banner" class="console-banner console-banner--warn hidden">
+                                    Hardware not connected — commands will not reach the line. Connect in step 3.
                                 </div>
-                            </div>
-                            <p class="ctrl-desc">Select a preset to send direct PWM command to hardware.</p>
 
-                            <div class="ctrl-grid" style="margin-bottom:16px;">
-                                <button id="btn-walk-slow" class="cmd-btn" data-walk="slow" disabled>Slow — 30%
-                                    PWM</button>
-                                <button id="btn-walk-medium" class="cmd-btn" data-walk="medium" disabled>Medium — 60%
-                                    PWM</button>
-                                <button id="btn-walk-fast" class="cmd-btn" data-walk="fast" disabled>Fast — 100%
-                                    PWM</button>
-                            </div>
+                                <!-- ── 1. COMMAND ──────────────────────────────────────── -->
+                                <section class="ctrl-group" aria-labelledby="cg-command">
+                                    <div class="ctrl-group-hd">
+                                        <span class="ctrl-group-step">1</span>
+                                        <span class="ctrl-group-title" id="cg-command">Command</span>
+                                    </div>
 
-                            <div id="walk-settle-banner" class="hidden"
-                                style="background:var(--info-soft);border:1px solid var(--info);border-radius:var(--radius-sm);padding:8px 12px;font-size:12px;color:var(--info);margin-bottom:12px;">
-                                Settling... allow up to 10 s for RPM to stabilize.
-                            </div>
+                                    <p class="ctrl-desc">Every button in this group <strong>starts the belt
+                                            immediately</strong>. Pick one — the presets drive PWM directly, the
+                                        setpoint path converts RPM to PWM.</p>
 
-                            <div class="ctrl-grid" style="margin-bottom:16px;">
-                                <button id="btn-run" class="cmd-btn"
-                                    style="background:var(--primary);color:#fff;border-color:var(--primary);">Engage
-                                    System</button>
-                                <button id="btn-stop" class="cmd-btn"
-                                    style="border-color:var(--danger);color:var(--danger);">Stop Motor</button>
-                            </div>
+                                    <div class="ctrl-sub">Fixed PWM presets</div>
+                                    <div class="ctrl-grid">
+                                        <button id="btn-walk-slow" class="btn" data-walk="slow" disabled>Start Slow —
+                                            30% PWM</button>
+                                        <button id="btn-walk-medium" class="btn" data-walk="medium" disabled>Start
+                                            Medium — 60% PWM</button>
+                                        <button id="btn-walk-fast" class="btn" data-walk="fast" disabled>Start Fast —
+                                            100% PWM</button>
+                                    </div>
 
-                            <button id="btn-estop" class="cmd-btn"
-                                style="background:var(--danger);color:#fff;border-color:var(--danger);height:48px;font-size:15px;font-weight:700;letter-spacing:0.04em;">
-                                EMERGENCY STOP — Hold
-                                <div class="estop-progress"></div>
-                            </button>
+                                    <div id="walk-settle-banner" class="console-banner console-banner--info hidden"
+                                        style="margin-top:10px;">
+                                        Settling… allow up to 10 s for RPM to stabilise.
+                                    </div>
 
-                            <button id="btn-hard-off" class="cmd-btn"
-                                style="margin-top:8px;border-color:var(--danger);color:var(--danger);font-size:12px;"
-                                disabled>
-                                HARD POWER CUT — NB2 Breaker
-                            </button>
+                                    <div class="ctrl-sub">RPM setpoint</div>
+                                    <div class="ctrl-grid">
+                                        <button id="btn-run" class="btn btn--primary">Start at RPM Setpoint</button>
+                                        <button id="btn-stop" class="btn btn--danger">Stop Motor</button>
+                                    </div>
+                                </section>
 
-                            <hr style="border:none;border-top:1px solid var(--border);margin:20px 0;">
+                                <!-- ── 2. POWER ────────────────────────────────────────── -->
+                                <section class="ctrl-group" aria-labelledby="cg-power">
+                                    <div class="ctrl-group-hd">
+                                        <span class="ctrl-group-step">2</span>
+                                        <span class="ctrl-group-title" id="cg-power">Power</span>
+                                        <span id="nb2-breaker-state-model" class="state-pill">OFF</span>
+                                    </div>
 
-                            <!-- Hardware Integration -->
-                            <div class="ctrl-head" style="margin-bottom:12px;">
-                                <div>
-                                    <span class="panel-eyebrow">Hardware</span>
-                                    <span class="ctrl-title">Connection</span>
-                                </div>
-                            </div>
-                            <div class="ctrl-grid" style="gap:6px;">
-                                <div
-                                    style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:4px 0;">
-                                    <span style="color:var(--text-muted);">ESP32 Bridge</span>
-                                    <span id="status-esp32" class="state-pill"
-                                        style="font-size:11px;">Disconnected</span>
-                                </div>
-                                <div
-                                    style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:4px 0;">
-                                    <span style="color:var(--text-muted);">Drive Motor</span>
-                                    <span id="status-motor" class="state-pill"
-                                        style="font-size:11px;">Disconnected</span>
-                                </div>
-                                <div
-                                    style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:4px 0;">
-                                    <span style="color:var(--text-muted);">Proximity Sensor</span>
-                                    <span id="status-proximity" class="state-pill"
-                                        style="font-size:11px;">Disconnected</span>
-                                </div>
-                                <div
-                                    style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:4px 0;">
-                                    <span style="color:var(--text-muted);">Temp Sensor</span>
-                                    <span id="status-temp" class="state-pill"
-                                        style="font-size:11px;">Disconnected</span>
-                                </div>
-                                <div
-                                    style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:4px 0;">
-                                    <span style="color:var(--text-muted);">NB2 Breaker</span>
-                                    <span id="status-breaker" class="state-pill"
-                                        style="font-size:11px;">Disconnected</span>
-                                </div>
-                                <div
-                                    style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:4px 0;">
-                                    <span style="color:var(--text-muted);">RS485 Stats</span>
-                                    <span id="status-rs485" class="state-pill"
-                                        style="font-size:11px;">Disconnected</span>
-                                </div>
-                            </div>
+                                    <p class="ctrl-desc">The NB2 breaker feeds the entire station. Unlock before
+                                        switching.</p>
 
-                            <!-- NB2 Breaker Control (Model Tab) -->
-                            <hr style="border:none;border-top:1px solid var(--border);margin:20px 0;">
-                            <div class="ctrl-head" style="margin-bottom:10px;">
-                                <div>
-                                    <span class="panel-eyebrow">Power Control</span>
-                                    <span class="ctrl-title">NB2 Breaker</span>
-                                </div>
-                                <span id="nb2-breaker-state-model" class="state-pill"
-                                    style="font-size:10px; margin-left:8px;">OFF</span>
-                            </div>
-                            <div style="display:flex;gap:8px;margin-bottom:0;width:100%;">
-                                <button id="btn-nb2-unlock-model" class="cmd-btn"
-                                    style="flex:1;height:36px;font-size:12px;font-weight:600;border-color:var(--status-warn);color:var(--status-warn);">
-                                    Unlock</button>
-                                <button id="btn-nb2-on-model" class="cmd-btn"
-                                    style="flex:1;height:36px;font-size:12px;font-weight:600;border-color:var(--status-ok);color:var(--status-ok);">ON
-                                    (Close)</button>
-                                <button id="btn-nb2-off-model" class="cmd-btn"
-                                    style="flex:1;height:36px;font-size:12px;font-weight:600;border-color:var(--danger);color:var(--danger);">OFF
-                                    (Open)</button>
-                            </div>
+                                    <div class="ctrl-row">
+                                        <button id="btn-nb2-unlock-model"
+                                            class="btn btn--warn btn--sm btn--row">Unlock</button>
+                                        <button id="btn-nb2-on-model" class="btn btn--ok btn--sm btn--row">ON
+                                            (Close)</button>
+                                        <button id="btn-nb2-off-model" class="btn btn--danger btn--sm btn--row">OFF
+                                            (Cut)</button>
+                                    </div>
 
-                            <!-- Breaker safety warning banner -->
-                            <div style="margin-top:10px;padding:10px 12px;border-radius:6px;
-                                        background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);
-                                        display:flex;align-items:flex-start;gap:8px;">
-                                <span style="font-size:16px;line-height:1;flex-shrink:0;margin-top:1px;">⚠️</span>
-                                <p
-                                    style="margin:0;font-size:11.5px;line-height:1.5;color:var(--danger);font-weight:500;">
-                                    Opening the breaker will <strong>immediately cut AC power</strong> to the entire
-                                    production station — motor, sensors and all field equipment will de-energise.
-                                    Ensure the line is fully stopped before proceeding.
-                                </p>
+                                    <div class="safety-note">
+                                        <span class="safety-note-icon">⚠️</span>
+                                        <p>OFF <strong>immediately cuts AC power</strong> to the whole station — motor,
+                                            sensors and all field equipment de-energise. The motor is e-stopped first,
+                                            then the breaker opens; both steps require the passphrase.</p>
+                                    </div>
+                                </section>
+
+                                <!-- ── 3. CONNECTION ───────────────────────────────────── -->
+                                <section class="ctrl-group" aria-labelledby="cg-conn">
+                                    <div class="ctrl-group-hd">
+                                        <span class="ctrl-group-step">3</span>
+                                        <span class="ctrl-group-title" id="cg-conn">Connection</span>
+                                    </div>
+
+                                    <div class="ctrl-grid">
+                                        <button id="btn-mqtt-connect-model" class="btn">Connect Hardware</button>
+
+                                        <!-- One health chip stands in for six rows that would
+                                             otherwise all read "Disconnected". Detail on demand. -->
+                                        <button type="button" class="hw-summary" id="hw-summary" data-health="bad"
+                                            aria-expanded="false" aria-controls="hw-detail">
+                                            <span class="hw-summary-dot"></span>
+                                            <span>Hardware</span>
+                                            <span class="hw-summary-count" id="hw-summary-count">0 / 6 online</span>
+                                            <svg class="hw-summary-chevron" width="12" height="12" viewBox="0 0 12 12"
+                                                fill="none" aria-hidden="true">
+                                                <path d="M2 4L6 8L10 4" stroke="currentColor" stroke-width="1.5"
+                                                    stroke-linecap="round" stroke-linejoin="round" />
+                                            </svg>
+                                        </button>
+                                    </div>
+
+                                    <div class="hw-detail" id="hw-detail" hidden>
+                                        <div class="hw-row">
+                                            <span class="hw-row-label">ESP32 Bridge</span>
+                                            <span id="status-esp32" class="state-pill">Disconnected</span>
+                                        </div>
+                                        <div class="hw-row">
+                                            <span class="hw-row-label">Drive Motor</span>
+                                            <span id="status-motor" class="state-pill">Disconnected</span>
+                                        </div>
+                                        <div class="hw-row">
+                                            <span class="hw-row-label">Proximity Sensor</span>
+                                            <span id="status-proximity" class="state-pill">Disconnected</span>
+                                        </div>
+                                        <div class="hw-row">
+                                            <span class="hw-row-label">Temp Sensor</span>
+                                            <span id="status-temp" class="state-pill">Disconnected</span>
+                                        </div>
+                                        <div class="hw-row">
+                                            <span class="hw-row-label">NB2 Breaker</span>
+                                            <span id="status-breaker" class="state-pill">Disconnected</span>
+                                        </div>
+                                        <div class="hw-row">
+                                            <span class="hw-row-label">RS485 Stats</span>
+                                            <span id="status-rs485" class="state-pill">Disconnected</span>
+                                        </div>
+                                    </div>
+                                </section>
+
                             </div>
 
-                            <!-- Camera -->
-                            <hr style="border:none;border-top:1px solid var(--border);margin:20px 0;">
-                            <div class="ctrl-head" style="margin-bottom:10px;">
-                                <span class="ctrl-title">Camera Mode</span>
+                            <!-- Docked outside the scroller: stop is always reachable. -->
+                            <div class="estop-dock">
+                                <button id="btn-estop" class="btn btn--estop">
+                                    EMERGENCY STOP — Hold
+                                    <div class="estop-progress"></div>
+                                </button>
                             </div>
-                            <select id="select-camera-mode"
-                                style="width:100%;padding:8px;height:36px;background:var(--surface-subtle);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);font-family:inherit;font-size:13px;outline:none;">
-                                <option value="orbit">Free Orbit</option>
-                                <option value="product" disabled>Product Follow (Disabled)</option>
-                            </select>
-
                         </div>
                     </div>
                 </div>
