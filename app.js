@@ -3414,7 +3414,7 @@ const CAM = {
         }
 
         if (typeof DTX !== 'undefined') DTX.setCamStatus('Camera unavailable', 'bad');
-        this.scheduleAutoRestart('no HLS support');
+        this.scheduleAutoRestart('no HLS support', true);
     },
 
     // play() at MANIFEST_PARSED time can silently fail or get interrupted
@@ -3452,7 +3452,17 @@ const CAM = {
 
     // Both transports report failure through here. Cooldown-gated so a
     // network that's down for minutes doesn't turn into a restart storm.
-    scheduleAutoRestart(reason) {
+    //
+    // Retries HLS again by default, NOT native WebRTC. Confirmed live: once
+    // WebRTC has already proven unreliable under current conditions (e.g.
+    // several simultaneous viewers saturating the uplink - MediaMTX's
+    // "write queue is full"), racing straight back to WebRTC on every
+    // recovery just re-hits the same bandwidth ceiling and fails again,
+    // producing exactly the "peer connection closed, retrying" loop this
+    // was supposed to fix. Only the very first connection attempt (start())
+    // and this function's own "no HLS support at all" caller should ever
+    // pass retryWebRtc=true.
+    scheduleAutoRestart(reason, retryWebRtc) {
         const now = Date.now();
         if (now - this.lastAutoRestart < this.AUTORESTART_COOLDOWN_MS) return;
         this.lastAutoRestart = now;
@@ -3462,7 +3472,7 @@ const CAM = {
             DTX.record('event', { event: 'camera_restart', manual: false });
         }
         addLog('Camera feed unreachable (' + reason + ') - auto-restarting.', 'warning');
-        setTimeout(() => this.start(), 1000);
+        setTimeout(() => { retryWebRtc ? this.start() : this.startHls(); }, 1000);
     },
 
     // Manual restart, wired to the operator's Restart button.
