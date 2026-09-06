@@ -1766,7 +1766,7 @@ model-viewer {
    ===================================================================== */
 
 /* ── Tablet / iPad Resolution (up to 1024px) ────────────────────────── */
-@media (max-width: 1024px) {
+@media (max-width: 1023px) {
   .topbar {
     padding: 8px 16px;
     flex-wrap: wrap;
@@ -1804,8 +1804,11 @@ model-viewer {
   }
 }
 
-/* ── Portrait Tablets & Small iPads (up to 768px) ──────────────────── */
-@media (max-width: 768px) {
+/* ── Narrow / phone-range layout (below the 768px tablet tier) ───────
+   Was `max-width: 768px`, which fires AT 768 — iPad portrait — and gave
+   tablets the single-column phone treatment. The tablet tier starts at
+   768, so this block must stop at 767. */
+@media (max-width: 767px) {
   .topbar {
     flex-direction: column;
     align-items: flex-start;
@@ -3341,4 +3344,120 @@ body[data-freshness="DISCONNECTED"] .tele-val {
     z-index: 5;
     border-radius: 0 0 var(--radius) var(--radius);
   }
+}
+
+/* =====================================================================
+   K. TABLET TIER (768–1023) AND TOUCH INPUT
+   Two independent axes:
+     • WIDTH  decides layout   (how many columns fit)
+     • POINTER decides ergonomics (how big a target must be)
+   They are not the same question — a 1024px iPad and a 1024px laptop match
+   the same width query but need different hit areas — so they get separate
+   rules rather than one conflated breakpoint.
+   ===================================================================== */
+
+/* ── Ergonomics: any coarse pointer, at any width ────────────────────── */
+@media (pointer: coarse) {
+  .btn,
+  .cmd-btn,
+  .hw-summary,
+  .tab-btn,
+  .cam-restart-btn,
+  .log-toggle,
+  .overlay-chip,
+  select {
+    min-height: 44px;
+  }
+
+  /* Icon-only controls need width as well as height. */
+  .cam-ctrl-btn,
+  .cam-ctrl-btn-sm,
+  .dpad-btn,
+  .log-toggle {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* The d-pad is laid out on a fixed 26px track; widen it to match. */
+  .camfeed-dpad {
+    grid-template-columns: repeat(3, 44px);
+  }
+
+  /* Roomier rows so neighbouring targets are not adjacent. */
+  .ctrl-grid { gap: 12px; }
+  .hw-row { padding: 8px 2px; }
+
+  /* Hover styling sticks after a tap on touch devices; suppress it. */
+  .btn:hover:not(:disabled) {
+    background: var(--surface-subtle);
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+
+  .btn--primary:hover:not(:disabled) {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+  }
+}
+
+/* ── Tablet layout: 768–1023 ─────────────────────────────────────────── */
+@media (min-width: 768px) and (max-width: 1023px) {
+  /* One column: at 768–1023 a 340px console would leave the 3D viewport too
+     narrow to be readable. The console stacks under the model instead. */
+  .model-layout { grid-template-columns: 1fr; }
+
+  /* E-STOP must stay reachable here too, not just on desktop. The column is
+     not height-bounded on tablet, so the dock sticks to the viewport bottom
+     while any part of the console is on screen. */
+  .estop-dock {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin: 0 -20px -20px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Give the console real breathing room now that it has the full width. */
+  .console-scroll {
+    padding: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    align-items: start;
+    gap: 18px;
+  }
+
+  /* The warning banner spans the grid rather than sitting in one cell. */
+  #model-hw-banner { grid-column: 1 / -1; }
+
+  /* Command group stays full width — its buttons are the primary targets. */
+  .console-scroll > section:first-of-type { grid-column: 1 / -1; }
+
+  /* The camera panel is a fixed 320px sidebar on desktop; on tablet it sits
+     under the canvas at full width so neither gets squeezed. */
+  #model-viewport-placeholder {
+    flex-direction: column !important;
+    height: auto !important;
+  }
+
+  /* The element carries an inline `height:100%`, which beats any stylesheet
+     `height` here; against an auto-height parent that collapses it to ~20px.
+     min-height is a different property, so the inline height cannot win. */
+  #model-canvas-wrap {
+    min-height: 420px;
+    flex: 0 0 auto;
+  }
+
+  .cam-overlay-box {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: none;
+    height: auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .camfeed-viewport { max-width: 520px; }
+
+  .tele-strip { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 }
