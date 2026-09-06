@@ -3273,7 +3273,14 @@ const CAM = {
     hlsActive: false,           // true once the HLS fallback is actually playing
     lastStats: null,
     lastAutoRestart: 0,
-    AUTORESTART_COOLDOWN_MS: 300000,
+    // Confirmed live: MediaMTX itself can crash on a broken source pipe and
+    // recovers via Restart=always in ~12s - but with a 5-minute cooldown,
+    // viewers caught by that blip sat dead for 5 minutes over a problem that
+    // was gone in 12 seconds. Retries now default to HLS (cheap for the
+    // server, not a fresh WebRTC handshake), so a short cooldown here isn't
+    // the restart-storm risk it would have been - 20s clears a transient
+    // blip fast without hammering a genuinely persistent outage.
+    AUTORESTART_COOLDOWN_MS: 20000,
     SETUP_TIMEOUT_MS: 12000,
 
     async start() {
