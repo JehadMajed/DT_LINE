@@ -247,6 +247,7 @@
                                 </div>
                                 <div id="camfeed-body" style="width:100%; display:flex; flex-direction:column; gap:0; flex-shrink:0;">
                                     <div class="camfeed-viewport" id="camfeed-viewport">
+<<<<<<< HEAD
                                         <div id="cam-zoom-wrapper" style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; transform-origin: center center; overflow:hidden;">
                                             <!-- Native WebRTC player. Owning the peer connection is what makes real latency
                                                  measurement possible - a cross-origin iframe hides getStats()
@@ -254,6 +255,16 @@
                                             <video id="cam-feed-video" class="cam-video hidden" autoplay playsinline muted></video>
                                             <iframe id="cam-feed-iframe" class="cam-media" src="https://rpi5.tail05b01c.ts.net/stream.html?src=pi_cam" title="Live Camera Stream"
                                                 allow="autoplay; fullscreen; picture-in-picture" scrolling="no"></iframe>
+=======
+                                        <div id="cam-zoom-wrapper"
+                                            style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; transform-origin: center center; overflow:hidden;">
+                                            <!-- Native player, WebRTC primary with an HLS fallback (see CAM in
+                                                 app.js). Owning playback directly - no iframe - is what makes real
+                                                 latency measurement possible via getStats(), and lets the fallback
+                                                 use a genuinely different transport instead of the same one. -->
+                                            <video id="cam-feed-video" class="cam-video hidden" autoplay playsinline
+                                                muted></video>
+>>>>>>> 595d83b80a43ac6390b73d893eb7d079f6e74394
                                         </div>
                                     </div>
                                     <div class="camfeed-controls">
@@ -831,8 +842,18 @@
     <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<<<<<<< HEAD
     <script src="app.js?v=12"></script>
     <script src="sim_engine.js?v=1"></script>
+=======
+    <!-- HLS fallback for the camera feed when native WebRTC can't connect
+         (chunked-over-HTTP survives network conditions WebRTC doesn't).
+         Chrome/Firefox/Edge need this; Safari/iOS play HLS natively and CAM
+         skips it there (see CAM.startHls() in app.js). -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+    <script src="app.js?v=15"></script>
+    <script src="sim_engine.js?v=3"></script>
+>>>>>>> 595d83b80a43ac6390b73d893eb7d079f6e74394
 
 </body>
 

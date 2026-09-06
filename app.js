@@ -2792,27 +2792,9 @@ const camPanRight = document.getElementById("cam-pan-right");
 
 const camZoomWrapper = document.getElementById("cam-zoom-wrapper");
 const camfeedViewport = document.getElementById("camfeed-viewport");
-const camFeedIframe = document.getElementById("cam-feed-iframe");
-// Captured once, before native WebRTC or any restart can blank/rewrite
-// iframe.src. probeCamera()/restartCamera() must key off THIS, not the live
-// iframe.src, or blanking the iframe on WebRTC success poisons both.
-const CAM_IFRAME_SRC = camFeedIframe ? camFeedIframe.src : null;
-
-// go2rtc's stream.html won't render its player below 320px wide and overflows a
-// smaller panel. Render the iframe at a fixed 640px logical width and scale it
-// down to exactly fill the viewport. (camZoom is applied separately on the
-// wrapper, so pinch-zoom still composes on top of this.)
-const CAM_IFRAME_W = 640;
-function fitCamIframe() {
-    if (!camFeedIframe || !camfeedViewport) return;
-    const s = camfeedViewport.clientWidth / CAM_IFRAME_W;
-    if (s > 0) camFeedIframe.style.transform = `scale(${s})`;
-}
-if (camfeedViewport && typeof ResizeObserver !== "undefined") {
-    new ResizeObserver(fitCamIframe).observe(camfeedViewport);
-}
-window.addEventListener("resize", fitCamIframe);
-fitCamIframe();
+// The feed is a plain <video> now (WebRTC or HLS, both native), so it just
+// fills #cam-zoom-wrapper via .cam-video's own CSS - no iframe-scaling hack
+// needed (see CAM_WHEP_URL / CAM_HLS_URL below).
 
 function clampPan() {
     if (camZoom <= 1.0) {
@@ -3171,38 +3153,13 @@ const DTX = {
     },
 
     // ═══════════════════════════════════════════════════════════════════════
-    // 6. CAMERA RECOVERY + MANUAL RESTART
-    // The feed is a cross-origin iframe, so its internals cannot be inspected;
-    // reachability is probed separately and the frame is reloaded on demand.
+    // 6. CAMERA RECOVERY
+    // Both the WebRTC and HLS players are now owned directly (see CAM below),
+    // so each reports its own failures natively - WebRTC via
+    // onconnectionstatechange, HLS via hls.js's ERROR event. Nothing here
+    // needs to poll a synthetic snapshot endpoint to guess whether frames are
+    // flowing. This object just renders the status text CAM tells it to.
     // ═══════════════════════════════════════════════════════════════════════
-    camBaseSrc: null,
-    camLastOk: 0,
-    camFailStreak: 0,
-    camProbeEverOk: false,          // has this probe EVER succeeded here?
-    camLastAutoRestart: 0,
-    CAM_FAIL_LIMIT: 3,              // consecutive failures before acting
-    CAM_AUTORESTART_COOLDOWN_MS: 300000,
-
-    restartCamera(manual) {
-        const f = document.getElementById('cam-feed-iframe');
-        if (!f) return;
-        if (!this.camBaseSrc) {
-            const seed = CAM_IFRAME_SRC || f.src;   // never seed from a blanked src
-            this.camBaseSrc = seed.split('&_r=')[0].split('?_r=')[0];
-        }
-        const sep = this.camBaseSrc.indexOf('?') !== -1 ? '&' : '?';
-        this.health.camRestarts++;
-        this.setCamStatus('Restarting...', 'warn');
-        f.src = this.camBaseSrc + sep + '_r=' + Date.now();
-        addLog(manual ? 'Camera feed restart requested by operator.'
-            : 'Camera feed unreachable - auto-restarting.', 'warning');
-        this.record('event', { event: 'camera_restart', manual: !!manual });
-        this.camFailStreak = 0;
-        if (manual) this.camLastAutoRestart = Date.now();
-        setTimeout(() => this.probeCamera(), 3000);
-        if (typeof CAM !== 'undefined') setTimeout(() => CAM.start(), 500);
-    },
-
     setCamStatus(text, kind) {
         const el = document.getElementById('cam-status-text');
         if (!el) return;
@@ -3211,55 +3168,6 @@ const DTX = {
         el.textContent = text;
         el.style.color = kind === 'bad' ? 'var(--status-crit)'
             : kind === 'warn' ? 'var(--status-warn)' : 'var(--status-ok)';
-    },
-
-    // Liveness probe. An earlier version used fetch(..., {mode:'no-cors'}) and
-    // treated any rejection as "camera down" — that fired a false restart on live
-    // hardware, because such a fetch can fail for reasons unrelated to the camera.
-    // Three guards now stand between a probe failure and any action:
-    //   1. it asks for an actual JPEG frame, so success means frames are flowing;
-    //   2. an <img> load is not subject to CORS, so the result is meaningful;
-    //   3. nothing is ever inferred unless the probe has succeeded at least once
-    //      in this environment, so an unsupported endpoint stays silent forever.
-    probeCamera() {
-        if (!CAM_IFRAME_SRC) return;
-        let origin, srcName;
-        try {
-            const u = new URL(CAM_IFRAME_SRC);   // independent of iframe's live src
-            origin = u.origin;
-            srcName = u.searchParams.get('src') || 'pi_cam';
-        } catch (e) { return; }
-
-        const img = new Image();
-        let settled = false;
-        const finish = ok => {
-            if (settled) return;
-            settled = true;
-            img.onload = img.onerror = null;
-            if (ok) {
-                this.camProbeEverOk = true;
-                this.camFailStreak = 0;
-                this.camLastOk = Date.now();
-                this.setCamStatus('', 'ok');
-                return;
-            }
-            // Probe never worked here => it is not a usable signal. Stay quiet.
-            if (!this.camProbeEverOk) { this.setCamStatus('', 'ok'); return; }
-            this.camFailStreak++;
-            if (this.camFailStreak < this.CAM_FAIL_LIMIT) {
-                this.setCamStatus('Feed check failed', 'warn');
-                return;
-            }
-            this.setCamStatus('Feed not responding', 'bad');
-            if (Date.now() - this.camLastAutoRestart > this.CAM_AUTORESTART_COOLDOWN_MS) {
-                this.camLastAutoRestart = Date.now();
-                this.restartCamera(false);
-            }
-        };
-        img.onload = () => finish(true);
-        img.onerror = () => finish(false);
-        setTimeout(() => finish(false), 6000);
-        img.src = origin + '/api/frame.jpeg?src=' + encodeURIComponent(srcName) + '&_=' + Date.now();
     },
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3297,12 +3205,10 @@ const DTX = {
     init() {
         this.initDB();
         setInterval(() => this.renderHealth(), 1000);
-        setInterval(() => this.probeCamera(), 15000);
         setInterval(() => this.prune(), 10 * 60 * 1000);
-        setTimeout(() => this.probeCamera(), 2000);
 
         const bind = (id, fn) => { const e = document.getElementById(id); if (e) e.addEventListener('click', fn); };
-        bind('btn-cam-restart', () => this.restartCamera(true));
+        bind('btn-cam-restart', () => { if (typeof CAM !== 'undefined') CAM.restart(); });
         bind('btn-export-csv', () => this.exportLog('csv'));
         bind('btn-export-json', () => this.exportLog('json'));
         bind('watchdog-alert', () => document.getElementById('watchdog-alert').classList.add('hidden'));
@@ -3333,8 +3239,8 @@ else DTX.init();
 
 
 // ============================================================================
-// NATIVE WEBRTC CAMERA PLAYER
-// The feed was a cross-origin iframe, which is a black box: it hides
+// NATIVE WEBRTC CAMERA PLAYER, WITH A GENUINELY DIFFERENT FALLBACK
+// The feed used to be a cross-origin iframe, which is a black box: it hides
 // RTCPeerConnection.getStats() entirely, so the delay a researcher actually
 // experiences could not be measured at all - only inferred from frame-delivery
 // rates, which measure throughput rather than latency.
@@ -3343,46 +3249,45 @@ else DTX.init();
 // jitter-buffer delay, round-trip time, the ICE candidate type actually in use
 // (host / srflx / relay), freezes and dropped frames.
 //
-// Signalling goes over HTTPS through the Tailscale Funnel, which handles it
-// fine. Media goes peer-to-peer over UDP using the server-reflexive candidate
-// the bridge now advertises. If any of that fails, the iframe fallback is shown
-// and the operator loses nothing but the measurement.
+// Signalling goes over HTTPS through the Cloudflare Tunnel (WHEP) to MediaMTX.
+// Media goes over UDP - direct, srflx, or relayed through Cloudflare's TURN
+// service when the network requires it.
+//
+// The fallback used to be the same MediaMTX WebRTC page in an iframe - i.e.
+// the same transport, so it failed for the same reasons (carrier NAT
+// rebinding, cellular jitter) at the same time as the primary. HLS is a
+// genuinely different transport: chunked over plain HTTP, so a network
+// hiccup just means the next segment is a little late, not a dead
+// PeerConnection. It costs a few seconds of latency in exchange for
+// surviving exactly the conditions WebRTC doesn't.
 // ============================================================================
+const CAM_WHEP_URL = 'https://cam.83838737rufhfhfucjfjdi8fi39.shop/cam/whep';
+const CAM_HLS_URL = 'https://cam-h1s.83838737rufhfhfucjfjdi8fi39.shop/cam/index.m3u8';
+
 const CAM = {
     pc: null,
+    hls: null,
     video: null,
-    iframe: null,
     statsTimer: null,
-    active: false,          // true once WebRTC is actually playing
+    active: false,              // true once native WebRTC is actually playing
+    hlsActive: false,           // true once the HLS fallback is actually playing
     lastStats: null,
+    lastAutoRestart: 0,
+    AUTORESTART_COOLDOWN_MS: 300000,
     SETUP_TIMEOUT_MS: 12000,
-
-    baseUrl() {
-        const f = document.getElementById('cam-feed-iframe');
-        if (!f || !f.src) return null;
-        try { return new URL(f.src).origin; } catch (e) { return null; }
-    },
-
-    streamName() {
-        const f = document.getElementById('cam-feed-iframe');
-        try { return new URL(f.src).searchParams.get('src') || 'pi_cam'; }
-        catch (e) { return 'pi_cam'; }
-    },
 
     async start() {
         this.video = document.getElementById('cam-feed-video');
-        this.iframe = document.getElementById('cam-feed-iframe');
-        const base = this.baseUrl();
-        if (!this.video || !base) return this.fallback('no video element or base URL');
+        if (!this.video) return;
 
         this.stop(true);
         try {
             const pc = new RTCPeerConnection({
-                // go2rtc advertises genuinely STUN-mapped server-reflexive candidates of
-                // its own, so strictly the browser could offer host candidates only. But
-                // the Pi sits behind carrier-grade NAT, and giving the browser its own
-                // srflx candidates lets ICE pair from either side rather than depending
-                // on one direction succeeding. Costs one STUN round trip at setup.
+                // MediaMTX advertises its own srflx/relay (TURN) candidates, so the
+                // browser could offer host candidates only. But the Pi sits behind
+                // carrier-grade NAT, and giving the browser its own srflx candidates
+                // lets ICE pair from either side rather than depending on one
+                // direction succeeding. Costs one STUN round trip at setup.
                 iceServers: [
                     { urls: 'stun:stun.l.google.com:19302' },
                     { urls: 'stun:stun.cloudflare.com:3478' },
@@ -3407,16 +3312,17 @@ const CAM = {
             await pc.setLocalDescription(await pc.createOffer());
             await this.waitForIce(pc);
 
-            const url = base + '/api/webrtc?src=' + encodeURIComponent(this.streamName());
-            const res = await fetch(url, {
+            // MediaMTX's WHEP endpoint: POST the raw SDP offer, get the raw SDP
+            // answer back directly in the response body (not JSON).
+            const res = await fetch(CAM_WHEP_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type: 'offer', sdp: pc.localDescription.sdp }),
+                headers: { 'Content-Type': 'application/sdp' },
+                body: pc.localDescription.sdp,
             });
             if (!res.ok) throw new Error('signalling HTTP ' + res.status);
-            const answer = await res.json();
-            if (!answer || !answer.sdp) throw new Error('signalling returned no SDP');
-            await pc.setRemoteDescription(answer);
+            const answerSdp = await res.text();
+            if (!answerSdp) throw new Error('signalling returned no SDP');
+            await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
 
             // Never leave a black rectangle on screen if the connection stalls.
             setTimeout(() => { if (!this.active) this.fallback('setup timed out'); }, this.SETUP_TIMEOUT_MS);
@@ -3425,7 +3331,7 @@ const CAM = {
         }
     },
 
-    // Gather ICE for a bounded time; go2rtc wants the candidates inside the offer.
+    // Gather ICE for a bounded time; MediaMTX wants the candidates inside the offer.
     waitForIce(pc) {
         return new Promise(resolve => {
             if (pc.iceGatheringState === 'complete') return resolve();
@@ -3438,42 +3344,103 @@ const CAM = {
 
     onConnected() {
         this.active = true;
+        this.hlsActive = false;
+        if (this.hls) { try { this.hls.destroy(); } catch (e) { } this.hls = null; }
         this.video.classList.remove('hidden');
-        if (this.iframe) {
-            this.iframe.classList.add('hidden');
-            this.iframe.src = 'about:blank';   // actually close its WebRTC session
-        }
+        if (typeof DTX !== 'undefined') DTX.setCamStatus('', 'ok');
         addLog('Camera: native WebRTC connected - latency is now measurable.', 'success');
         if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_webrtc_connected' });
         clearInterval(this.statsTimer);
         this.statsTimer = setInterval(() => this.pollStats(), 2000);
     },
 
-    // Show the iframe instead. The operator must never be left with a blank panel.
+    // WebRTC failed - drop to HLS, a genuinely different transport (see header
+    // comment). If HLS also fails, escalate through the cooldown-gated
+    // restart below so the two paths can't loop off each other indefinitely.
     fallback(reason) {
         if (this.active) return;                 // already playing; ignore late errors
         this.stop(true);
-        if (this.video) this.video.classList.add('hidden');
-        if (this.iframe) {
-            this.iframe.classList.remove('hidden');
-            if (CAM_IFRAME_SRC && this.iframe.src !== CAM_IFRAME_SRC) {
-                this.iframe.src = CAM_IFRAME_SRC;   // restore real feed, was blanked by onConnected()
-            }
-        }
-        addLog('Camera: WebRTC unavailable (' + reason + ') - using the embedded player. '
-             + 'Latency cannot be measured on that path.', 'warning');
+        addLog('Camera: WebRTC unavailable (' + reason + ') - falling back to HLS.', 'warning');
         if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_webrtc_fallback', reason: reason });
+        this.startHls();
+    },
+
+    startHls() {
+        if (!this.video) return;
+        if (this.hls) { try { this.hls.destroy(); } catch (e) { } this.hls = null; }
+
+        if (this.video.canPlayType('application/vnd.apple.mpegurl')) {
+            // Safari/iOS play HLS natively - no library needed.
+            this.video.src = CAM_HLS_URL;
+            this.video.classList.remove('hidden');
+            this.video.play().catch(() => { });
+            this.hlsActive = true;
+            if (typeof DTX !== 'undefined') DTX.setCamStatus('', 'ok');
+            return;
+        }
+        if (typeof Hls === 'undefined' || !Hls.isSupported()) {
+            if (typeof DTX !== 'undefined') DTX.setCamStatus('Camera unavailable', 'bad');
+            this.scheduleAutoRestart('no HLS support');
+            return;
+        }
+
+        const hls = new Hls({ liveSyncDurationCount: 3 });
+        this.hls = hls;
+        hls.loadSource(CAM_HLS_URL);
+        hls.attachMedia(this.video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            this.video.classList.remove('hidden');
+            this.video.play().catch(() => { });
+            this.hlsActive = true;
+            if (typeof DTX !== 'undefined') DTX.setCamStatus('', 'ok');
+            addLog('Camera: HLS fallback playing.', 'info');
+        });
+        hls.on(Hls.Events.ERROR, (event, data) => {
+            if (!data.fatal) return;
+            this.hlsActive = false;
+            if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_hls_error', reason: data.type });
+            this.scheduleAutoRestart('HLS ' + data.type);
+        });
+    },
+
+    // Both transports report failure through here. Cooldown-gated so a
+    // network that's down for minutes doesn't turn into a restart storm.
+    scheduleAutoRestart(reason) {
+        const now = Date.now();
+        if (now - this.lastAutoRestart < this.AUTORESTART_COOLDOWN_MS) return;
+        this.lastAutoRestart = now;
+        if (typeof DTX !== 'undefined') {
+            DTX.setCamStatus('Feed not responding', 'bad');
+            DTX.health.camRestarts++;
+            DTX.record('event', { event: 'camera_restart', manual: false });
+        }
+        addLog('Camera feed unreachable (' + reason + ') - auto-restarting.', 'warning');
+        setTimeout(() => this.start(), 1000);
+    },
+
+    // Manual restart, wired to the operator's Restart button.
+    restart() {
+        addLog('Camera feed restart requested by operator.', 'info');
+        if (typeof DTX !== 'undefined') {
+            DTX.health.camRestarts++;
+            DTX.record('event', { event: 'camera_restart', manual: true });
+        }
+        this.lastAutoRestart = Date.now();   // also resets the auto-restart cooldown
+        this.stop(true);
+        this.start();
     },
 
     stop(quiet) {
         clearInterval(this.statsTimer); this.statsTimer = null;
         this.active = false;
+        this.hlsActive = false;
         if (this.pc) { try { this.pc.close(); } catch (e) { } this.pc = null; }
-        if (this.video) this.video.srcObject = null;
-        if (!quiet) addLog('Camera: WebRTC stopped.', 'info');
+        if (this.hls) { try { this.hls.destroy(); } catch (e) { } this.hls = null; }
+        if (this.video) { this.video.srcObject = null; this.video.removeAttribute('src'); }
+        if (!quiet) addLog('Camera: stopped.', 'info');
     },
 
-    // The measurement the iframe made impossible.
+    // The measurement the old iframe made impossible.
     async pollStats() {
         if (!this.pc) return;
         let report;
@@ -3521,7 +3488,8 @@ const CAM = {
 
     // Rows for the health panel.
     healthRows() {
-        if (!this.active) return [['Camera', 'embedded player (no stats)', true]];
+        if (this.hlsActive) return [['Camera', 'HLS fallback (no latency stats)', true]];
+        if (!this.active) return [['Camera', 'reconnecting…', true]];
         const s = this.lastStats;
         if (!s) return [['Camera', 'WebRTC, measuring…', false]];
         const lat = this.latencyMs();
