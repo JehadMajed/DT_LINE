@@ -3434,11 +3434,24 @@ const CAM = {
         clearInterval(this.statsTimer); this.statsTimer = null;
         this.active = false;
         this.hlsActive = false;
+        this._lastJBDelay = null;
+        this._lastJBCount = null;
+        this.badBufferStreak = 0;
         if (this.pc) { try { this.pc.close(); } catch (e) { } this.pc = null; }
         if (this.hls) { try { this.hls.destroy(); } catch (e) { } this.hls = null; }
         if (this.video) { this.video.srcObject = null; this.video.removeAttribute('src'); }
         if (!quiet) addLog('Camera: stopped.', 'info');
     },
+
+    // Consecutive polls with a pathologically high buffer before forcing a
+    // restart. A connection can be "connected" per WebRTC's own state machine
+    // while its actual path is lossy enough to be unwatchable - retransmits
+    // pile up, the buffer grows without bound, and connectionState never
+    // reports anything is wrong. Nothing short of watching the buffer itself
+    // catches that.
+    BAD_BUFFER_MS: 1200,
+    BAD_BUFFER_STREAK_LIMIT: 3,
+    badBufferStreak: 0,
 
     // The measurement the old iframe made impossible.
     async pollStats() {
@@ -3451,10 +3464,22 @@ const CAM = {
 
         report.forEach(r => {
             if (r.type === 'inbound-rtp' && r.kind === 'video') {
-                // Mean time each frame spent in the jitter buffer - the dominant and
-                // previously invisible component of perceived delay.
+                // jitterBufferDelay/jitterBufferEmittedCount are lifetime-cumulative,
+                // so dividing them straight gives a running average that can only
+                // climb and stops reflecting anything current after a couple of
+                // minutes. Diffing against the previous poll instead gives the mean
+                // buffer delay for just the last ~2s - a live reading, and the right
+                // signal to react to.
                 if (r.jitterBufferEmittedCount > 0) {
-                    s.bufferMs = (r.jitterBufferDelay / r.jitterBufferEmittedCount) * 1000;
+                    const prevDelay = this._lastJBDelay;
+                    const prevCount = this._lastJBCount;
+                    this._lastJBDelay = r.jitterBufferDelay;
+                    this._lastJBCount = r.jitterBufferEmittedCount;
+                    if (prevCount != null) {
+                        const dCount = r.jitterBufferEmittedCount - prevCount;
+                        const dDelay = r.jitterBufferDelay - prevDelay;
+                        if (dCount > 0) s.bufferMs = (dDelay / dCount) * 1000;
+                    }
                 }
                 s.fps = (r.framesPerSecond !== undefined) ? r.framesPerSecond : null;
                 s.freezes = (r.freezeCount !== undefined) ? r.freezeCount : null;
@@ -3476,6 +3501,21 @@ const CAM = {
         });
 
         this.lastStats = s;
+
+        if (s.bufferMs != null && s.bufferMs > this.BAD_BUFFER_MS) {
+            this.badBufferStreak++;
+            if (this.badBufferStreak >= this.BAD_BUFFER_STREAK_LIMIT) {
+                this.badBufferStreak = 0;
+                this.active = false;   // so fallback() doesn't ignore this as a late error
+                this.stop(true);
+                addLog('Camera: WebRTC connected but buffer stuck at ' + Math.round(s.bufferMs)
+                     + 'ms - path is bad despite being "connected". Falling back to HLS.', 'warning');
+                if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_webrtc_degraded', bufferMs: Math.round(s.bufferMs) });
+                this.startHls();
+            }
+        } else if (s.bufferMs != null) {
+            this.badBufferStreak = 0;
+        }
     },
 
     // One-way estimate: jitter buffer plus half the round trip. Decode and render
