@@ -3437,6 +3437,7 @@ const CAM = {
         this._lastJBDelay = null;
         this._lastJBCount = null;
         this.badBufferStreak = 0;
+        this.stallStreak = 0;
         if (this.pc) { try { this.pc.close(); } catch (e) { } this.pc = null; }
         if (this.hls) { try { this.hls.destroy(); } catch (e) { } this.hls = null; }
         if (this.video) { this.video.srcObject = null; this.video.removeAttribute('src'); }
@@ -3451,7 +3452,9 @@ const CAM = {
     // catches that.
     BAD_BUFFER_MS: 1200,
     BAD_BUFFER_STREAK_LIMIT: 3,
+    STALL_STREAK_LIMIT: 3,
     badBufferStreak: 0,
+    stallStreak: 0,
 
     // The measurement the old iframe made impossible.
     async pollStats() {
@@ -3461,6 +3464,7 @@ const CAM = {
 
         const s = { bufferMs: null, rttMs: null, candidate: null, fps: null, freezes: null, dropped: null };
         let pairId = null;
+        let framesDelta = null;   // new frames emitted since the last poll; null until the 2nd poll
 
         report.forEach(r => {
             if (r.type === 'inbound-rtp' && r.kind === 'video') {
@@ -3478,6 +3482,7 @@ const CAM = {
                     if (prevCount != null) {
                         const dCount = r.jitterBufferEmittedCount - prevCount;
                         const dDelay = r.jitterBufferDelay - prevDelay;
+                        framesDelta = dCount;
                         if (dCount > 0) s.bufferMs = (dDelay / dCount) * 1000;
                     }
                 }
@@ -3501,6 +3506,26 @@ const CAM = {
         });
 
         this.lastStats = s;
+
+        // A full stall (zero new frames between polls) leaves bufferMs at null,
+        // since there is no delta to compute one from - the exact case the
+        // buffer-growth check below can never see, and the worst one: a frozen
+        // picture, not just a laggy one.
+        if (framesDelta != null && framesDelta <= 0) {
+            this.stallStreak++;
+            this.badBufferStreak = 0;
+            if (this.stallStreak >= this.STALL_STREAK_LIMIT) {
+                this.stallStreak = 0;
+                this.active = false;
+                this.stop(true);
+                addLog('Camera: WebRTC connected but no new frames for ~'
+                     + (this.STALL_STREAK_LIMIT * 2) + 's - stream is frozen. Falling back to HLS.', 'warning');
+                if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_webrtc_stalled' });
+                this.startHls();
+            }
+            return;
+        }
+        this.stallStreak = 0;
 
         if (s.bufferMs != null && s.bufferMs > this.BAD_BUFFER_MS) {
             this.badBufferStreak++;
