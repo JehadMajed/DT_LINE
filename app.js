@@ -3437,19 +3437,26 @@ const CAM = {
         this._lastHlsTime = -1;
         this.hlsStallStreak = 0;
         this.hlsHealthTimer = setInterval(() => {
-            if (!this.hlsActive || !this.video) return;
+            // Gated on this.hls (torn down in stop()), not on hlsActive - a
+            // stall that gets its restart suppressed by the cooldown (see
+            // scheduleAutoRestart) must not also silently disable the one
+            // thing watching for the NEXT stall. Confirmed live: without
+            // this, one cooldown-suppressed stall permanently stopped this
+            // check from ever running again, even though playback itself
+            // kept working fine.
+            if (!this.hls || !this.video) return;
             if (this.video.paused) {
                 this.video.play().catch(() => { });
             }
             if (this.video.currentTime > this._lastHlsTime) {
                 this._lastHlsTime = this.video.currentTime;
                 this.hlsStallStreak = 0;
+                this.hlsActive = true;   // self-corrects a flag left stale by a suppressed restart
                 return;
             }
             this.hlsStallStreak++;
             if (this.hlsStallStreak >= this.HLS_STALL_STREAK_LIMIT) {
                 this.hlsStallStreak = 0;
-                this.hlsActive = false;
                 addLog('Camera: HLS fallback stopped advancing - restarting.', 'warning');
                 if (typeof DTX !== 'undefined') DTX.record('event', { event: 'camera_hls_stalled' });
                 this.scheduleAutoRestart('HLS stalled');
