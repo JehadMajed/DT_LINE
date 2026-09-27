@@ -127,10 +127,18 @@ WD=$(systemctl show -p RuntimeWatchdogUSec --value 2>/dev/null)
 [ -n "$WD" ] && [ "$WD" != "0" ] && ok "systemd pets the watchdog ($WD)" || bad "systemd RuntimeWatchdogSec not set"
 
 MNT=$(findmnt -no OPTIONS / 2>/dev/null)
-case "$MNT" in
-    *ro,*|ro) bad "ROOT FILESYSTEM IS READ-ONLY — the storage is failing, act now" ;;
-    *errors=remount-ro*) ok "root mounted rw with errors=remount-ro" ;;
-    *) bad "root is missing errors=remount-ro (silent corruption would stay silent)" ;;
+# Match the FIRST option field only. A substring test cannot work here: the
+# healthy option list contains "errors=remount-ro,commit=60", so a glob for
+# "ro," matches a perfectly writable filesystem and screams that the storage
+# is dying. A false alarm on the loudest message in the suite is worse than no
+# check, because it teaches everyone to ignore it.
+case "${MNT%%,*}" in
+    ro) bad "ROOT FILESYSTEM IS READ-ONLY — the storage is failing, act now" ;;
+    rw) case "$MNT" in
+            *errors=remount-ro*) ok "root mounted rw with errors=remount-ro" ;;
+            *) bad "root is missing errors=remount-ro (silent corruption would stay silent)" ;;
+        esac ;;
+    *)  bad "could not read root mount options" ;;
 esac
 
 # Bit 0 is undervoltage now, bit 16 is undervoltage since boot. A sagging
