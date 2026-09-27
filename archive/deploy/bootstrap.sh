@@ -236,12 +236,21 @@ if ! command -v tailscale >/dev/null; then
 fi
 if command -v tailscale >/dev/null; then
     if ! tailscale status >/dev/null 2>&1; then
-        echo
-        echo "   ACTION NEEDED: authenticate this Pi to your tailnet."
-        echo "   A URL will be printed -- open it, approve, then return here."
-        echo "   Remove the old rpi5 node from the admin console first; it died with the card."
-        echo
-        sudo tailscale up || warn "tailscale up did not complete"
+        # `tailscale up` prints a login URL and then blocks until somebody
+        # visits it. With no TTY -- which is the case when an agent runs this
+        # over SSH -- that blocks forever, so defer instead of hanging.
+        if [ -t 0 ]; then
+            echo
+            echo "   ACTION NEEDED: authenticate this Pi to your tailnet."
+            echo "   A URL will be printed -- open it, approve, then return here."
+            echo "   Remove the old rpi5 node from the admin console first; it died with the card."
+            echo
+            sudo tailscale up || warn "tailscale up did not complete"
+        else
+            warn "not a terminal — skipping tailscale auth (it would block)"
+            note "run this from a shell on the Pi, then re-run bootstrap.sh:"
+            note "    sudo tailscale up"
+        fi
     else
         note "already authenticated: $(tailscale status --json 2>/dev/null | jq -r .Self.DNSName 2>/dev/null)"
     fi
@@ -281,7 +290,12 @@ if [ -s "$SECRET" ]; then
     note ".dt_secret already present — leaving it alone"
 else
     echo "   The dashboard prompts the operator for this; the Pi checks it here."
-    read -rsp "   New breaker passphrase (blank to skip): " PASS; echo
+    PASS=""
+    if [ -t 0 ]; then
+        read -rsp "   New breaker passphrase (blank to skip): " PASS; echo
+    else
+        warn "not a terminal — leaving .dt_secret unset"
+    fi
     if [ -n "$PASS" ]; then
         printf '%s' "$PASS" > "$SECRET"
         chmod 600 "$SECRET"
