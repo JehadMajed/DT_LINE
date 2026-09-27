@@ -78,29 +78,46 @@ echo "[8] Camera reachable from the public internet?"
 CAM_HOST="${CAM_HOST:-cam.83838737rufhfhfucjfjdi8fi39.shop}"
 systemctl is-active --quiet cloudflared && ok "cloudflared active" || bad "cloudflared not active"
 
-# go2rtc's HLS session id is short-lived and consumed once, so the three
-# requests must follow each other with no shell work in between -- a `cat` or
-# an `echo` between them is enough to make the segment 404 against a perfectly
-# healthy camera. Retried because that race is timing-dependent, not a fault.
-CAM_OK=""
+# The two halves are checked separately and on purpose. Fetching the public
+# URL from the Pi itself hairpins out to Cloudflare and back, which is neither
+# what a viewer does nor reliable -- it failed here against a camera that was
+# provably serving 144 KB segments to the outside world at that moment. Worse,
+# a combined check cannot say WHICH half broke.
+#
+# Half 1: does the connector actually hold connections to Cloudflare? The
+# process can run while registering none, which is the alive-but-dark case.
+READY=$(curl -fsS -m 5 http://127.0.0.1:20241/ready 2>/dev/null \
+        | sed -n 's/.*"readyConnections":\([0-9]*\).*/\1/p')
+if [ "${READY:-0}" -ge 1 ]; then
+    ok "cloudflared holds $READY ready connections to Cloudflare"
+else
+    bad "cloudflared has no ready connections (tunnel is down from the edge's view)"
+fi
+
+# Half 2: is there real video behind it? Checked against go2rtc directly. The
+# HLS session id is short-lived and consumed once, so these three requests run
+# with no shell work between them -- even an `echo` in between is enough to
+# make the segment 404 against a perfectly healthy camera.
+SEG_OK=""
 for attempt in 1 2 3; do
-    V=$(curl -fsS -m 15 "https://$CAM_HOST/api/stream.m3u8?src=pi_cam" 2>/dev/null | grep -v '^#' | head -1 | tr -d '\r')
-    P=$(curl -fsS -m 15 "https://$CAM_HOST/api/$V" 2>/dev/null | grep -v '^#' | head -1 | tr -d '\r')
-    curl -fsS -m 20 -o /tmp/dt-seg.ts "https://$CAM_HOST/api/hls/$P" 2>/dev/null
-    BYTES=$(wc -c < /tmp/dt-seg.ts 2>/dev/null || echo 0)
-    # 0x47 is the MPEG-TS sync byte: proof of actual video, not an error page
-    # served with a 200.
-    if [ "${BYTES:-0}" -gt 1000 ] && [ "$(head -c 1 /tmp/dt-seg.ts | od -An -tx1 | tr -d ' ')" = "47" ]; then
-        CAM_OK="$BYTES"; break
+    rm -f /tmp/dt-seg.ts
+    V=$(curl -fsS -m 10 "http://127.0.0.1:1984/api/stream.m3u8?src=pi_cam" 2>/dev/null | grep -v '^#' | head -1 | tr -d '\r')
+    P=$(curl -fsS -m 10 "http://127.0.0.1:1984/api/$V" 2>/dev/null | grep -v '^#' | head -1 | tr -d '\r')
+    curl -fsS -m 15 -o /tmp/dt-seg.ts "http://127.0.0.1:1984/api/hls/$P" 2>/dev/null
+    # 0x47 is the MPEG-TS sync byte: proof of video, not an error page that
+    # also arrives with a 200 and a plausible length.
+    if [ -s /tmp/dt-seg.ts ] && [ "$(head -c 1 /tmp/dt-seg.ts | od -An -tx1 | tr -d ' ')" = "47" ]; then
+        SEG_OK=$(wc -c < /tmp/dt-seg.ts); break
     fi
     sleep 2
 done
 rm -f /tmp/dt-seg.ts
-if [ -n "$CAM_OK" ]; then
-    ok "live MPEG-TS segment served publicly (${CAM_OK} bytes)"
+if [ -n "$SEG_OK" ]; then
+    ok "go2rtc serves a live MPEG-TS segment (${SEG_OK} bytes)"
 else
-    bad "no playable segment from https://$CAM_HOST after 3 attempts"
+    bad "go2rtc produced no playable segment — camera source is dark"
 fi
+echo "    (verify the public URL from OFF the Pi: https://$CAM_HOST/api/stream.m3u8?src=pi_cam)"
 
 echo
 echo "==== $PASS passed, $FAIL failed ===="
