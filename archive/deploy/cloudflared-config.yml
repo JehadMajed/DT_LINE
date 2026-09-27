@@ -1,0 +1,30 @@
+# Reference copy of /etc/cloudflared/config.yml on the Pi.
+#
+# Locally managed on purpose. A dashboard-managed tunnel keeps its ingress in
+# Cloudflare, which means a rebuild has to rediscover it -- exactly what cost
+# a day when the SD card died. Here it is in the repo.
+#
+# bootstrap.sh substitutes the tunnel id and the credentials path; the tunnel
+# id differs per tunnel and the credentials JSON is a secret that never enters
+# this repo.
+#
+# Origin is go2rtc (:1984) directly. The previous path went through a MediaMTX
+# relay on :8888 that cloudflared reached over Tailscale. That relay existed
+# only on the card and was documented nowhere. go2rtc already serves HLS at
+# /api/stream.m3u8?src=pi_cam, so the relay is gone rather than rebuilt.
+
+tunnel: TUNNEL_ID
+credentials-file: /etc/cloudflared/TUNNEL_ID.json
+
+# Fixed metrics port so the watchdog can ask whether the connector actually has
+# ready connections. Without this cloudflared picks a random port and the only
+# health signal left is "the process exists", which misses a wedged connector.
+metrics: 127.0.0.1:20241
+
+originRequest:
+  connectTimeout: 10s
+
+ingress:
+  - hostname: cam.83838737rufhfhfucjfjdi8fi39.shop
+    service: http://127.0.0.1:1984
+  - service: http_status:404

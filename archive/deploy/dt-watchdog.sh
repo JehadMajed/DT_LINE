@@ -47,13 +47,13 @@ if systemctl is-active --quiet dt-bridge; then
     fi
 fi
 
-# CAMERA OWNERSHIP: go2rtc, rpicam-vid and the Tailscale Funnel are owned by a
-# separate concurrent session. This watchdog must not restart the camera or
-# rewrite the Funnel mapping underneath it -- two processes independently
-# restarting the same service is the failure that cost us a serial-port
-# debugging session. Set MANAGE_CAMERA=1 to restore checks 3 and 4 when
-# ownership returns here.
-MANAGE_CAMERA="${MANAGE_CAMERA:-0}"
+# CAMERA OWNERSHIP: this was 0 because a separate concurrent session owned
+# go2rtc and the Funnel, and two supervisors restarting one service is the
+# failure that cost us a serial-port debugging session. That session ended
+# with the SD card on 2026-09-16, and the camera was rebuilt here, so this
+# watchdog owns the path again. Ambiguous ownership meant nothing supervised
+# the camera at all.
+MANAGE_CAMERA="${MANAGE_CAMERA:-1}"
 
 # 3) Camera: go2rtc up and pi_cam has a producer?
 if [ "$MANAGE_CAMERA" = "1" ] && systemctl cat go2rtc.service >/dev/null 2>&1; then
@@ -69,12 +69,22 @@ if [ "$MANAGE_CAMERA" = "1" ] && systemctl cat go2rtc.service >/dev/null 2>&1; t
     fi
 fi
 
-# 4) Tailscale Funnel: is the public URL actually reachable and mapped to :1984?
-#    (the oneshot funnel unit can fail at boot if tailscaled isn't online yet)
-if [ "$MANAGE_CAMERA" = "1" ] && command -v tailscale >/dev/null; then
-    if ! tailscale serve status 2>/dev/null | grep -q '127.0.0.1:1984'; then
-        LOG "funnel mapping missing -> re-applying"
-        sudo tailscale serve reset 2>/dev/null || true
-        sudo tailscale funnel --bg --https=443 http://127.0.0.1:1984 || true
+# 4) Camera's public path: the Cloudflare Tunnel carries the stream to the
+#    deployed dashboard. systemd restarts cloudflared if it exits, but a
+#    connector can stay up while registering no connections -- the process is
+#    alive and the camera is still dark from outside, which is precisely the
+#    "alive but wedged" case this watchdog exists for.
+if [ "$MANAGE_CAMERA" = "1" ] && systemctl cat cloudflared.service >/dev/null 2>&1; then
+    if ! systemctl is-active --quiet cloudflared; then
+        LOG "cloudflared not active -> restart"
+        sudo systemctl restart cloudflared
+    elif ! journalctl -u cloudflared --since "5 minutes ago" --no-pager 2>/dev/null \
+            | grep -q "Registered tunnel connection"; then
+        # No registration in the last 5 min AND no live connection means it is
+        # not merely quiet -- it never came up. Metrics are the cheap check.
+        if ! curl -fsS --max-time 5 http://127.0.0.1:20241/ready 2>/dev/null | grep -q '"readyConnections":[1-9]'; then
+            LOG "cloudflared has no ready connections -> restart"
+            sudo systemctl restart cloudflared
+        fi
     fi
 fi

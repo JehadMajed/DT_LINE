@@ -41,7 +41,9 @@ done
 
 # 5) Passwordless restart for the watchdog
 SUDOERS=/etc/sudoers.d/dt-watchdog
-echo "$USER_NAME ALL=(root) NOPASSWD: /bin/systemctl restart dt-bridge, /bin/systemctl restart go2rtc, /usr/bin/tailscale serve reset, /usr/bin/tailscale funnel *" | sudo tee "$SUDOERS" >/dev/null
+# Narrow on purpose: restarts only, and only these three units. cloudflared is
+# here because the watchdog now owns the camera's public path too.
+echo "$USER_NAME ALL=(root) NOPASSWD: /bin/systemctl restart dt-bridge, /bin/systemctl restart go2rtc, /bin/systemctl restart cloudflared" | sudo tee "$SUDOERS" >/dev/null
 sudo chmod 440 "$SUDOERS"
 
 # 6) Enable + (re)start the bridge

@@ -8,7 +8,7 @@ ok()   { echo "  PASS: $*"; PASS=$((PASS+1)); }
 bad()  { echo "  FAIL: $*"; FAIL=$((FAIL+1)); }
 
 echo "[1] Units enabled for boot?"
-for U in dt-bridge go2rtc tailscale-funnel; do
+for U in dt-bridge go2rtc cloudflared; do
     systemctl is-enabled --quiet "$U" && ok "$U enabled" || bad "$U NOT enabled"
 done
 
@@ -70,8 +70,25 @@ echo "[7] Camera producer healthy?"
 info=$(curl -s --max-time 5 "http://127.0.0.1:1984/api/streams?src=pi_cam" || true)
 echo "$info" | grep -q '"producers"' && ok "go2rtc pi_cam has a producer" || bad "go2rtc pi_cam unhealthy: $info"
 
-echo "[8] Camera reachable through Tailscale Funnel?"
-tailscale serve status 2>/dev/null | grep -q 1984 && ok "funnel -> 1984 mapped" || bad "funnel mapping missing (tailscale serve status)"
+echo "[8] Camera reachable from the public internet?"
+# Through the Cloudflare Tunnel, not the Tailscale Funnel -- the Funnel was the
+# WebRTC-era path and no longer carries the stream. Fetching a real media
+# segment, not just the manifest: a playlist can be served while the camera
+# behind it produces nothing, and that is the failure worth catching.
+CAM_HOST="${CAM_HOST:-cam.83838737rufhfhfucjfjdi8fi39.shop}"
+systemctl is-active --quiet cloudflared && ok "cloudflared active" || bad "cloudflared not active"
+VARIANT=$(curl -fsS --max-time 20 "https://$CAM_HOST/api/stream.m3u8?src=pi_cam" 2>/dev/null | grep -v '^#' | head -1 | tr -d '\r')
+if [ -z "$VARIANT" ]; then
+    bad "no HLS playlist from https://$CAM_HOST"
+else
+    SEG=$(curl -fsS --max-time 20 "https://$CAM_HOST/api/$VARIANT" 2>/dev/null | grep -v '^#' | head -1 | tr -d '\r')
+    BYTES=$(curl -fsS --max-time 25 -o /dev/null -w '%{size_download}' "https://$CAM_HOST/api/hls/$SEG" 2>/dev/null)
+    if [ "${BYTES:-0}" -gt 10000 ]; then
+        ok "live video segment served publicly (${BYTES} bytes)"
+    else
+        bad "playlist served but the media segment was empty (${BYTES:-0} bytes)"
+    fi
+fi
 
 echo
 echo "==== $PASS passed, $FAIL failed ===="

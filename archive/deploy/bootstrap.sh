@@ -254,7 +254,68 @@ EOF
                                        || warn "go2rtc did not start (journalctl -u go2rtc)"
 fi
 
-# ── 6. Tailscale + Funnel ────────────────────────────────────────────────────
+# ── 5b. Camera's public path (Cloudflare Tunnel) ─────────────────────────────
+# This is how the deployed dashboard actually reaches the camera. It is NOT the
+# Tailscale Funnel below -- that was the WebRTC-era path and no longer carries
+# the stream.
+#
+# The first run needs a browser login (`cloudflared tunnel login`) because the
+# certificate authorises this machine against the zone; after that everything
+# here is unattended and idempotent.
+say "Camera tunnel (cloudflared)"
+CF_ZONE="${CF_ZONE:-83838737rufhfhfucjfjdi8fi39.shop}"
+CF_HOST="${CF_HOST:-cam.$CF_ZONE}"
+CF_TUNNEL="${CF_TUNNEL:-dt-line-cam}"
+
+if ! command -v cloudflared >/dev/null; then
+    sudo mkdir -p --mode=0755 /usr/share/keyrings
+    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
+        | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+    echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" \
+        | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
+    sudo apt-get update -qq && sudo apt-get install -y -qq cloudflared
+fi
+note "$(cloudflared --version 2>&1 | head -1)"
+
+if [ ! -f "$HOME/.cloudflared/cert.pem" ]; then
+    if [ -t 0 ]; then
+        note "authorise this machine against $CF_ZONE in the browser window"
+        cloudflared tunnel login || warn "cloudflared login did not complete"
+    else
+        warn "no cert.pem and not a terminal — skipping the camera tunnel"
+        note "run once from a shell on the Pi:  cloudflared tunnel login"
+    fi
+fi
+
+if [ -f "$HOME/.cloudflared/cert.pem" ]; then
+    chmod 600 "$HOME/.cloudflared/cert.pem"
+    if ! cloudflared tunnel list 2>/dev/null | awk '{print $2}' | grep -qx "$CF_TUNNEL"; then
+        cloudflared tunnel create "$CF_TUNNEL" 2>&1 | tail -1
+    fi
+    CF_ID=$(cloudflared tunnel list 2>/dev/null | awk -v n="$CF_TUNNEL" '$2==n {print $1}')
+    if [ -n "${CF_ID:-}" ]; then
+        sudo mkdir -p /etc/cloudflared
+        sudo cp "$HOME/.cloudflared/$CF_ID.json" /etc/cloudflared/ 2>/dev/null || true
+        sudo chmod 600 /etc/cloudflared/*.json 2>/dev/null || true
+        sed -e "s#TUNNEL_ID#$CF_ID#g" -e "s#cam\.[^ ]*\.shop#$CF_HOST#" \
+            "$HERE/cloudflared-config.yml" | sudo tee /etc/cloudflared/config.yml >/dev/null
+        if sudo cloudflared --config /etc/cloudflared/config.yml tunnel ingress validate >/dev/null 2>&1; then
+            # DNS first: a connector with no route serves nothing.
+            cloudflared tunnel route dns "$CF_TUNNEL" "$CF_HOST" 2>&1 | tail -1
+            systemctl list-unit-files 2>/dev/null | grep -q '^cloudflared\.service' \
+                || sudo cloudflared --config /etc/cloudflared/config.yml service install >/dev/null 2>&1
+            sudo systemctl enable --now cloudflared >/dev/null 2>&1
+            sudo systemctl restart cloudflared
+            sleep 5
+            systemctl is-active --quiet cloudflared && note "tunnel up: https://$CF_HOST" \
+                                                    || warn "cloudflared did not start"
+        else
+            warn "cloudflared rejected the ingress config — tunnel not started"
+        fi
+    fi
+fi
+
+# ── 6. Tailscale (admin access) ──────────────────────────────────────────────
 say "Tailscale"
 if ! command -v tailscale >/dev/null; then
     curl -fsSL https://tailscale.com/install.sh | sh || warn "tailscale install failed"
@@ -280,29 +341,20 @@ if command -v tailscale >/dev/null; then
         note "already authenticated: $(tailscale status --json 2>/dev/null | jq -r .Self.DNSName 2>/dev/null)"
     fi
 
-    # The funnel mapping is what makes the camera reachable off-site. As a
-    # oneshot unit it can fire before tailscaled is online, which is why the
-    # watchdog re-applies it (dt-watchdog.sh check 4).
-    sudo tee /etc/systemd/system/tailscale-funnel.service >/dev/null <<'EOF'
-[Unit]
-Description=Tailscale Funnel -> go2rtc (:1984)
-After=tailscaled.service go2rtc.service network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStartPre=/usr/bin/tailscale serve reset
-ExecStart=/usr/bin/tailscale funnel --bg --https=443 http://127.0.0.1:1984
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    sudo systemctl daemon-reload
-    sudo systemctl enable tailscale-funnel >/dev/null 2>&1 || true
-    sudo systemctl restart tailscale-funnel || warn "funnel unit failed (is the tailnet authenticated?)"
-    tailscale serve status 2>/dev/null | grep -q 1984 && note "funnel -> 127.0.0.1:1984" \
-                                                      || warn "funnel mapping not visible yet"
+    # No Funnel unit. It served the camera in the WebRTC era; the stream now
+    # goes out over the Cloudflare Tunnel in section 5b, and a second public
+    # path for the same port is an attack surface nobody watches. Tailscale is
+    # kept purely for reaching this Pi over SSH when off-site.
+    #
+    # Remove the old unit if an earlier bootstrap installed it: leaving an
+    # enabled unit that fails on every boot trains everyone to ignore a red
+    # line in systemctl, which is how a real failure goes unnoticed.
+    if systemctl list-unit-files 2>/dev/null | grep -q '^tailscale-funnel\.service'; then
+        sudo systemctl disable --now tailscale-funnel >/dev/null 2>&1 || true
+        sudo rm -f /etc/systemd/system/tailscale-funnel.service
+        sudo systemctl daemon-reload
+        note "removed the obsolete tailscale-funnel unit"
+    fi
 fi
 
 # ── 7. Breaker passphrase ────────────────────────────────────────────────────
@@ -338,7 +390,7 @@ bash "$HERE/install.sh"
 
 # ── 9. Summary ───────────────────────────────────────────────────────────────
 say "Summary"
-for U in dt-bridge go2rtc tailscale-funnel mosquitto; do
+for U in dt-bridge go2rtc cloudflared mosquitto; do
     printf '   %-20s enabled=%-8s active=%s\n' "$U" \
         "$(systemctl is-enabled "$U" 2>/dev/null || echo no)" \
         "$(systemctl is-active  "$U" 2>/dev/null || echo no)"

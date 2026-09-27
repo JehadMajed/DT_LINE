@@ -3256,7 +3256,12 @@ else DTX.init();
 // Slower to start, a few seconds behind live - and it survives exactly the
 // conditions that kept breaking WebRTC on this connection.
 // ============================================================================
-const CAM_HLS_URL = 'https://cam-h1s.83838737rufhfhfucjfjdi8fi39.shop/cam/index.m3u8';
+// Served by go2rtc on the Pi (:1984) straight through a Cloudflare Tunnel.
+// The previous URL fronted a MediaMTX relay on :8888 that cloudflared reached
+// over Tailscale. That relay lived only on the SD card, was described nowhere,
+// and did not survive it -- go2rtc already speaks HLS, so the hop is gone and
+// the whole path is now reproducible from archive/deploy/bootstrap.sh.
+const CAM_HLS_URL = 'https://cam.83838737rufhfhfucjfjdi8fi39.shop/api/stream.m3u8?src=pi_cam';
 
 const CAM = {
     hls: null,
@@ -3264,8 +3269,8 @@ const CAM = {
     hlsHealthTimer: null,
     hlsActive: false,           // true once the HLS stream is actually playing
     lastAutoRestart: 0,
-    // Confirmed live: MediaMTX itself can crash on a broken source pipe and
-    // recovers via Restart=always in ~12s - a long cooldown here would leave
+    // Confirmed live: the HLS origin itself can crash on a broken source pipe
+    // and recovers via Restart=always in ~12s - a long cooldown here would leave
     // viewers caught by that blip sitting dead far longer than the outage
     // itself lasted. Restarts are cheap (just re-loading the HLS source, no
     // handshake), so a short cooldown isn't a storm risk - 20s clears a
