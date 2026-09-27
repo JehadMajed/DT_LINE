@@ -16,11 +16,26 @@ echo "[2] Units running now?"
 systemctl is-active --quiet dt-bridge && ok "dt-bridge active" || bad "dt-bridge not active"
 systemctl is-active --quiet go2rtc   && ok "go2rtc active"   || bad "go2rtc not active"
 
-echo "[3] Telemetry flowing? (watch journal 15s)"
-if timeout 15 journalctl -u dt-bridge -f --no-pager | grep -m1 -q "ESP32 -> MQTT"; then
-    ok "telemetry lines seen"
+echo "[3] Telemetry flowing? (the bridge prints [SUMMARY] every 30s)"
+# NOT "ESP32 -> MQTT". That is a per-packet line, and journal thinning collapses
+# repeats ("seen 30x"), so the old check matched zero against a perfectly
+# healthy bridge -- the same stale-string bug that once had the watchdog
+# restarting the bridge every two minutes. [SUMMARY] is printed unconditionally
+# every 30 s, which is why the watchdog switched to it; 35 s covers one period
+# plus jitter.
+SUM=$(timeout 35 journalctl -u dt-bridge -f --no-pager 2>/dev/null | grep -m1 "\[SUMMARY\]")
+if [ -z "$SUM" ]; then
+    bad "no [SUMMARY] in 35s — the bridge loop itself is stalled"
 else
-    bad "no telemetry in 15s"
+    echo "    ${SUM#*[SUMMARY] }"
+    HZ=$(printf '%s' "$SUM" | sed -n 's/.*telemetry [0-9]* (\([0-9.]*\) Hz).*/\1/p')
+    # Distinguish a wedged BRIDGE from a silent DEVICE: the loop can be turning
+    # while the ESP32 says nothing, and those need different responses.
+    if printf '%s' "$SUM" | grep -q "device_online=True"; then
+        ok "telemetry ${HZ:-?} Hz, device online"
+    else
+        bad "bridge loop alive but device_online=False (ESP32 silent, not a bridge fault)"
+    fi
 fi
 
 echo "[4] Crash recovery: kill the bridge, expect systemd restart within 10s"
