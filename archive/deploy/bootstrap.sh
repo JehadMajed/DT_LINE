@@ -137,7 +137,32 @@ else
     rm -f "$TMP"
 fi
 
-# 3d. The watchdog log is appended to every 2 minutes, forever.
+# 3d. SSH: key-only. This Pi is reachable from the public internet through the
+#     Funnel, so the account password must not be an attack surface.
+#
+#     Guarded on authorized_keys being non-empty: disabling password auth with
+#     no key installed locks everyone out of a machine that is not always
+#     physically reachable. Named 00- because sshd takes the FIRST value it
+#     sees for a keyword, and Pi OS ships 50-cloud-init.conf.
+if [ -s "$HOME/.ssh/authorized_keys" ]; then
+    sudo tee /etc/ssh/sshd_config.d/00-dt-hardening.conf >/dev/null <<'EOF'
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+EOF
+    if sudo sshd -t 2>/dev/null; then
+        sudo systemctl reload ssh 2>/dev/null || sudo systemctl reload sshd 2>/dev/null
+        note "ssh: key-only (password auth disabled)"
+    else
+        sudo rm -f /etc/ssh/sshd_config.d/00-dt-hardening.conf
+        warn "sshd rejected the hardening drop-in — reverted, password auth left on"
+    fi
+else
+    warn "no ~/.ssh/authorized_keys — leaving password auth ENABLED to avoid a lockout"
+    note "install a key, then re-run this script to close it"
+fi
+
+# 3e. The watchdog log is appended to every 2 minutes, forever.
 sudo tee /etc/logrotate.d/dt-watchdog >/dev/null <<EOF
 /home/$USER_NAME/dt-watchdog.log {
     weekly
