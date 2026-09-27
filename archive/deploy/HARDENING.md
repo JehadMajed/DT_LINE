@@ -17,6 +17,36 @@ nothing it protects lives anywhere except that one card.
 
 ---
 
+## Status — 2026-09-27
+
+Rebuilt and verified. `test_stability.sh` reports **18/18 after a cold boot
+with zero manual commands**, including the platform tier this document added.
+
+Done: `bootstrap.sh` (one-command rebuild), the hardware watchdog, journald to
+RAM, `errors=remount-ro` + `noatime,commit=60`, key-only SSH, log rotation, the
+watchdog as a systemd timer, the camera's public path rebuilt on a locally
+managed Cloudflare Tunnel, watchdog supervision of the camera and tunnel,
+platform health sampling (read-only mount, EXT4 errors, undervoltage), and
+outbound alerting.
+
+Still open, in order of what they cost:
+
+1. **The root cause is untouched** — still an SD card, no UPS, no clean
+   shutdown on power loss. Items 1 and 2 below. The card in the Pi today is
+   the one that already demonstrated it loses everything on a mains pull.
+2. **Nothing leaves the Pi.** The owner elected to rely on GitHub, which does
+   cover everything reproducible now that provisioning is code — but not
+   `dt.db`, and not `.dt_secret` (which must never go in a public repo).
+3. **`linedt.pages.dev` is not built from this repo.** It serves a
+   `CAM_HLS_URL` that appears in no branch, so pushing `app.js` does not change
+   what viewers see. Until that is reconnected, the camera works but the
+   dashboard still points at the dead relay.
+4. `.dt_secret` is unset, so every remote breaker-off is rejected — which
+   matches the standing decision that breaker-OFF should be removed outright.
+5. Alerting is plumbed but has no destination until `.dt_alert_url` exists.
+
+---
+
 ## Tier 0 — what died with the card
 
 Recreate these first. Everything else is prevention; this is the hole.
