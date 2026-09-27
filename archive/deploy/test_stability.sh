@@ -77,17 +77,29 @@ echo "[8] Camera reachable from the public internet?"
 # behind it produces nothing, and that is the failure worth catching.
 CAM_HOST="${CAM_HOST:-cam.83838737rufhfhfucjfjdi8fi39.shop}"
 systemctl is-active --quiet cloudflared && ok "cloudflared active" || bad "cloudflared not active"
-VARIANT=$(curl -fsS --max-time 20 "https://$CAM_HOST/api/stream.m3u8?src=pi_cam" 2>/dev/null | grep -v '^#' | head -1 | tr -d '\r')
-if [ -z "$VARIANT" ]; then
-    bad "no HLS playlist from https://$CAM_HOST"
-else
-    SEG=$(curl -fsS --max-time 20 "https://$CAM_HOST/api/$VARIANT" 2>/dev/null | grep -v '^#' | head -1 | tr -d '\r')
-    BYTES=$(curl -fsS --max-time 25 -o /dev/null -w '%{size_download}' "https://$CAM_HOST/api/hls/$SEG" 2>/dev/null)
-    if [ "${BYTES:-0}" -gt 10000 ]; then
-        ok "live video segment served publicly (${BYTES} bytes)"
-    else
-        bad "playlist served but the media segment was empty (${BYTES:-0} bytes)"
+
+# go2rtc's HLS session id is short-lived and consumed once, so the three
+# requests must follow each other with no shell work in between -- a `cat` or
+# an `echo` between them is enough to make the segment 404 against a perfectly
+# healthy camera. Retried because that race is timing-dependent, not a fault.
+CAM_OK=""
+for attempt in 1 2 3; do
+    V=$(curl -fsS -m 15 "https://$CAM_HOST/api/stream.m3u8?src=pi_cam" 2>/dev/null | grep -v '^#' | head -1 | tr -d '\r')
+    P=$(curl -fsS -m 15 "https://$CAM_HOST/api/$V" 2>/dev/null | grep -v '^#' | head -1 | tr -d '\r')
+    curl -fsS -m 20 -o /tmp/dt-seg.ts "https://$CAM_HOST/api/hls/$P" 2>/dev/null
+    BYTES=$(wc -c < /tmp/dt-seg.ts 2>/dev/null || echo 0)
+    # 0x47 is the MPEG-TS sync byte: proof of actual video, not an error page
+    # served with a 200.
+    if [ "${BYTES:-0}" -gt 1000 ] && [ "$(head -c 1 /tmp/dt-seg.ts | od -An -tx1 | tr -d ' ')" = "47" ]; then
+        CAM_OK="$BYTES"; break
     fi
+    sleep 2
+done
+rm -f /tmp/dt-seg.ts
+if [ -n "$CAM_OK" ]; then
+    ok "live MPEG-TS segment served publicly (${CAM_OK} bytes)"
+else
+    bad "no playable segment from https://$CAM_HOST after 3 attempts"
 fi
 
 echo
