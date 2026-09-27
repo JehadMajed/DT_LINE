@@ -119,6 +119,40 @@ else
 fi
 echo "    (verify the public URL from OFF the Pi: https://$CAM_HOST/api/stream.m3u8?src=pi_cam)"
 
+echo "[9] Platform tier (the layer the SD card died in)"
+# Written in a config file is not the same as active. fstab carried
+# errors=remount-ro for a full boot cycle before it was actually mounted.
+[ -e /dev/watchdog ] && ok "hardware watchdog device present" || bad "no /dev/watchdog (dtparam=watchdog=on needs a reboot)"
+WD=$(systemctl show -p RuntimeWatchdogUSec --value 2>/dev/null)
+[ -n "$WD" ] && [ "$WD" != "0" ] && ok "systemd pets the watchdog ($WD)" || bad "systemd RuntimeWatchdogSec not set"
+
+MNT=$(findmnt -no OPTIONS / 2>/dev/null)
+case "$MNT" in
+    *ro,*|ro) bad "ROOT FILESYSTEM IS READ-ONLY — the storage is failing, act now" ;;
+    *errors=remount-ro*) ok "root mounted rw with errors=remount-ro" ;;
+    *) bad "root is missing errors=remount-ro (silent corruption would stay silent)" ;;
+esac
+
+# Bit 0 is undervoltage now, bit 16 is undervoltage since boot. A sagging
+# supply is what turns an ordinary power event into a dead card, so a past
+# episode is worth surfacing even when the current reading is clean.
+if command -v vcgencmd >/dev/null; then
+    T=$(vcgencmd get_throttled 2>/dev/null | cut -d= -f2)
+    case "$T" in
+        0x0) ok "no undervoltage since boot ($T)" ;;
+        "")  bad "vcgencmd returned nothing" ;;
+        *)   if [ $(( $T & 0x1 )) -ne 0 ]; then
+                 bad "UNDERVOLTAGE RIGHT NOW ($T) — fix the supply before anything else"
+             else
+                 bad "undervoltage occurred earlier this boot ($T) — supply is marginal"
+             fi ;;
+    esac
+fi
+
+systemctl is-active --quiet dt-watchdog.timer && ok "watchdog timer scheduled" || bad "dt-watchdog.timer not active"
+ERRS=$(dmesg --level=err,crit --notime 2>/dev/null | grep -c "EXT4-fs error")
+[ "${ERRS:-0}" -eq 0 ] && ok "no EXT4-fs errors in dmesg" || bad "$ERRS EXT4-fs errors in dmesg — the card is corrupting"
+
 echo
 echo "==== $PASS passed, $FAIL failed ===="
 echo "FINAL: reboot the Pi ('sudo reboot'), wait 2 min, re-run this script."

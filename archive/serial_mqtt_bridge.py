@@ -297,6 +297,102 @@ def _read_cpu_times():
     idle = parts[3] + parts[4]
     return sum(parts), idle
 
+# -- Outbound alerting --------------------------------------------------------
+# This system records incidents impeccably and, until now, notified nobody:
+# recovery_gave_up is the loudest event in this file and it landed in SQLite
+# and an MQTT topic no consumer watches.
+#
+# The destination is deliberately NOT hardcoded. Put a webhook URL in
+# ~/DT_LINE/archive/.dt_alert_url (git-ignored) and alerts POST to it; an ntfy
+# topic works with no account:  echo 'https://ntfy.sh/some-private-topic' > ...
+# With no file, alerts still reach the journal, SQLite and MQTT — they just do
+# not leave the Pi, which is the honest default rather than shipping operational
+# data to a third party nobody chose.
+_ALERT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.dt_alert_url')
+try:
+    with open(_ALERT_PATH) as _f:
+        ALERT_URL = _f.read().strip()
+    print(f"Alerts will POST to the URL in {_ALERT_PATH}")
+except OSError:
+    ALERT_URL = ''
+
+def notify_human(text):
+    """Best effort and non-blocking: an unreachable alert endpoint must never
+    stall the health loop or take the bridge down with it."""
+    if not ALERT_URL:
+        return
+    def _send():
+        try:
+            req = urllib.request.Request(
+                ALERT_URL, data=text.encode("utf-8"),
+                headers={"Title": "DT_LINE rpi5", "Priority": "high"})
+            urllib.request.urlopen(req, timeout=10).read(1)
+        except Exception as e:
+            print(f"[ALERT] delivery failed: {e}")
+    threading.Thread(target=_send, daemon=True).start()
+
+# -- Platform health ----------------------------------------------------------
+# The application tier was thoroughly instrumented while the machine under it
+# was not, and on 2026-09-16 that machine's SD card died from a mains pull with
+# nothing watching for the symptoms. These are those symptoms.
+
+def _fs_readonly():
+    """ext4 remounts read-only on error (errors=remount-ro). The bridge would
+    otherwise keep running, keep publishing, and silently fail every write."""
+    try:
+        with open("/proc/mounts") as f:
+            for line in f:
+                p = line.split()
+                if len(p) > 3 and p[1] == "/":
+                    return int("ro" in p[3].split(","))
+    except Exception:
+        pass
+    return None
+
+def _ext4_errors():
+    try:
+        r = subprocess.run(["dmesg", "--level=err,crit", "--notime"],
+                           capture_output=True, text=True, timeout=5)
+        return r.stdout.count("EXT4-fs error") if r.returncode == 0 else None
+    except Exception:
+        return None
+
+def _throttled():
+    """vcgencmd get_throttled. Bit 0 = undervoltage now, bit 16 = since boot.
+    A marginal supply is what turns a power event into a dead card, so this is
+    the one number here that predicts the failure rather than reporting it."""
+    try:
+        r = subprocess.run(["vcgencmd", "get_throttled"],
+                           capture_output=True, text=True, timeout=5)
+        if r.returncode != 0 or "=" not in r.stdout:
+            return None, None, None
+        raw = int(r.stdout.strip().split("=")[1], 16)
+        return raw, raw & 0x1, (raw >> 16) & 0x1
+    except Exception:
+        return None, None, None
+
+def _uptime_s():
+    try:
+        with open("/proc/uptime") as f:
+            return int(float(f.read().split()[0]))
+    except Exception:
+        return None
+
+# Fires once per condition per bridge start: a read-only filesystem does not
+# heal, and re-alerting every 60s would bury the first notice.
+_alerted = set()
+
+def platform_alert(kind, detail):
+    if kind in _alerted:
+        return
+    _alerted.add(kind)
+    print(f"[PLATFORM] {kind}: {detail}")
+    STORE.log_event(kind, severity="error", detail=detail)
+    publish_all(TOPIC_EVENT, json.dumps(
+        {"kind": kind, "ts": now_ms(), **detail}), force=True)
+    notify_human(f"{kind}: {detail}")
+
+
 def health_loop():
     prev_total, prev_idle = _read_cpu_times()
     while not _stop.is_set():
@@ -332,11 +428,31 @@ def health_loop():
                         rss_mb = float(line.split()[1]) / 1024.0
                         break
 
+            fs_ro = _fs_readonly()
+            ext4_err = _ext4_errors()
+            throttled, uv_now, uv_ever = _throttled()
+
             STORE.log_health(cpu_pct=cpu, mem_pct=mem_pct, cpu_temp_c=cpu_temp,
                              disk_free_mb=disk_free_mb, bridge_rss_mb=rss_mb,
                              telemetry_hz=_tel_hz_recent,
                              relay_active=_relay_thread.is_alive(),
-                             intent_armed=_intent_cmd is not None)
+                             intent_armed=_intent_cmd is not None,
+                             fs_readonly=fs_ro, ext4_errors=ext4_err,
+                             throttled=throttled, undervolt_now=uv_now,
+                             undervolt_ever=uv_ever, uptime_s=_uptime_s())
+
+            # Recording these and telling nobody is what the last incident was.
+            if fs_ro:
+                platform_alert("fs_readonly", {
+                    "detail": "root filesystem remounted read-only — the storage "
+                              "is failing and every write is now silently lost"})
+            if ext4_err:
+                platform_alert("ext4_errors", {"count": ext4_err})
+            if uv_now:
+                platform_alert("undervoltage", {
+                    "throttled": hex(throttled or 0),
+                    "detail": "supply is sagging under load; this is the condition "
+                              "that turns a power event into a dead card"})
         except Exception as e:
             print(f"[HEALTH] sample failed: {e}")
 
@@ -454,6 +570,11 @@ def recovery_give_up(gap_ms):
         {"kind": "recovery_gave_up", "gap_ms": gap_ms, "ts": now_ms(),
          "detail": "soft reset failed; power cycle disabled by policy"}),
         force=True)
+    # The ladder has run out of rungs and the line is unobserved. If any event
+    # in this file is worth waking someone for, it is this one.
+    notify_human(f"recovery gave up: ESP32 silent for {gap_ms} ms. "
+                 f"Soft reset did not restore telemetry and the power cycle is "
+                 f"disabled by policy. Manual intervention required.")
 
 def service_recovery(gap_ms):
     """Climb one rung at most per call. Called from the liveness timer."""

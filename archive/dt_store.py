@@ -42,10 +42,19 @@ SCHEMA = [
          id INTEGER PRIMARY KEY AUTOINCREMENT, ts_up INTEGER, ts_down INTEGER,
          link TEXT, endpoint TEXT, downtime_ms INTEGER, reason TEXT)""",
     "CREATE INDEX IF NOT EXISTS ix_connections_ts ON connections(ts_down, ts_up)",
+    # The platform columns exist because the application tier was fully
+    # instrumented while the machine under it was not: the SD card died on
+    # 2026-09-16 and nothing had been watching for the symptoms that precede
+    # it. fs_readonly is the loud one (ext4 remounts read-only on error, and
+    # the bridge would otherwise keep running while every write failed);
+    # undervolt is the predictive one, since a marginal supply is what makes a
+    # power event destructive.
     """CREATE TABLE IF NOT EXISTS health (
          ts INTEGER NOT NULL, cpu_pct REAL, mem_pct REAL, cpu_temp_c REAL,
          disk_free_mb REAL, bridge_rss_mb REAL, telemetry_hz REAL,
-         relay_active INTEGER, intent_armed INTEGER)""",
+         relay_active INTEGER, intent_armed INTEGER,
+         fs_readonly INTEGER, ext4_errors INTEGER, throttled INTEGER,
+         undervolt_now INTEGER, undervolt_ever INTEGER, uptime_s INTEGER)""",
     "CREATE INDEX IF NOT EXISTS ix_health_ts ON health(ts)",
 ]
 
@@ -155,14 +164,21 @@ class Store:
             (ts_up, ts_down, link, endpoint, downtime_ms, reason))
 
     def log_health(self, **kw):
+        def _i(key):
+            v = kw.get(key)
+            return None if v is None else int(v)
         self._put(
             """INSERT INTO health (ts, cpu_pct, mem_pct, cpu_temp_c, disk_free_mb,
-                 bridge_rss_mb, telemetry_hz, relay_active, intent_armed)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+                 bridge_rss_mb, telemetry_hz, relay_active, intent_armed,
+                 fs_readonly, ext4_errors, throttled, undervolt_now,
+                 undervolt_ever, uptime_s)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (int(time.time() * 1000), kw.get("cpu_pct"), kw.get("mem_pct"),
              kw.get("cpu_temp_c"), kw.get("disk_free_mb"), kw.get("bridge_rss_mb"),
              kw.get("telemetry_hz"), int(bool(kw.get("relay_active"))),
-             int(bool(kw.get("intent_armed")))))
+             int(bool(kw.get("intent_armed"))),
+             _i("fs_readonly"), _i("ext4_errors"), _i("throttled"),
+             _i("undervolt_now"), _i("undervolt_ever"), _i("uptime_s")))
 
     def _open(self):
         first = not os.path.exists(self.path)
@@ -183,6 +199,13 @@ class Store:
         for col, decl in (("src", "TEXT"), ("outcome", "TEXT")):
             try:
                 db.execute("ALTER TABLE commands ADD COLUMN %s %s" % (col, decl))
+            except sqlite3.OperationalError:
+                pass          # already present
+        # Same, for databases created before the platform-health columns.
+        for col in ("fs_readonly", "ext4_errors", "throttled",
+                    "undervolt_now", "undervolt_ever", "uptime_s"):
+            try:
+                db.execute("ALTER TABLE health ADD COLUMN %s INTEGER" % col)
             except sqlite3.OperationalError:
                 pass          # already present
         # Rebuild migration: older databases had cmd_id as the PRIMARY KEY,

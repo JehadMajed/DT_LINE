@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Belt-and-suspenders watchdog. systemd already restarts crashed services;
-# this catches "process alive but wedged". Runs from cron every 2 minutes:
-#   */2 * * * * /home/jehadroot/DT_LINE/archive/deploy/dt-watchdog.sh >> /home/jehadroot/dt-watchdog.log 2>&1
+# this catches "process alive but wedged". Driven by dt-watchdog.timer every
+# 2 minutes (installed by install.sh); output goes to the journal:
+#   systemctl list-timers dt-watchdog.timer
+#   journalctl -u dt-watchdog.service -f
 set -u
 LOG() { echo "$(date '+%F %T') $*"; }
 

@@ -50,10 +50,47 @@ sudo chmod 440 "$SUDOERS"
 sudo systemctl enable dt-bridge
 sudo systemctl restart dt-bridge
 
-# 7) Cron watchdog
+# 7) Watchdog, as a systemd timer rather than cron.
+#    A user crontab is invisible to `systemctl`, does not survive a rebuild
+#    unless someone remembers it, and sends its output to a file nothing
+#    rotates. A timer shows up in `systemctl list-timers`, logs to the journal
+#    with the rest of the system, and Persistent=true catches up a run missed
+#    while the Pi was off.
 chmod +x "$HERE/dt-watchdog.sh"
-CRON_LINE="*/2 * * * * $HERE/dt-watchdog.sh >> /home/$USER_NAME/dt-watchdog.log 2>&1"
-( crontab -l 2>/dev/null | grep -v dt-watchdog.sh ; echo "$CRON_LINE" ) | crontab -
+crontab -l 2>/dev/null | grep -q dt-watchdog.sh && {
+    crontab -l 2>/dev/null | grep -v dt-watchdog.sh | crontab -
+    echo "Removed the old cron watchdog line (replaced by the timer)"
+}
+
+sudo tee /etc/systemd/system/dt-watchdog.service >/dev/null <<EOF
+[Unit]
+Description=Digital Twin - watchdog sweep (bridge liveness, camera, tunnel)
+After=dt-bridge.service
+
+[Service]
+Type=oneshot
+User=$USER_NAME
+ExecStart=$HERE/dt-watchdog.sh
+StandardOutput=journal
+StandardError=journal
+EOF
+
+sudo tee /etc/systemd/system/dt-watchdog.timer >/dev/null <<'EOF'
+[Unit]
+Description=Run the Digital Twin watchdog every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now dt-watchdog.timer >/dev/null 2>&1
 
 echo
 echo "== Status =="
