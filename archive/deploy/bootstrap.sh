@@ -289,19 +289,42 @@ fi
 
 if [ -f "$HOME/.cloudflared/cert.pem" ]; then
     chmod 600 "$HOME/.cloudflared/cert.pem"
-    if ! cloudflared tunnel list 2>/dev/null | awk '{print $2}' | grep -qx "$CF_TUNNEL"; then
-        cloudflared tunnel create "$CF_TUNNEL" 2>&1 | tail -1
-    fi
+
+    # A tunnel's credentials JSON is written once, at creation, and only onto
+    # this machine. After a card loss the tunnel still exists in Cloudflare
+    # while its credentials do not, and `tunnel create` refuses a duplicate
+    # name -- so a rebuild would find the tunnel, fail to copy a file that is
+    # gone, and bring up a connector with no credentials. Recreate it instead:
+    # the name and the DNS record are what matter, the id is disposable.
     CF_ID=$(cloudflared tunnel list 2>/dev/null | awk -v n="$CF_TUNNEL" '$2==n {print $1}')
+    if [ -n "${CF_ID:-}" ] && [ ! -f "$HOME/.cloudflared/$CF_ID.json" ] \
+       && [ ! -f "/etc/cloudflared/$CF_ID.json" ]; then
+        warn "tunnel $CF_TUNNEL exists but its credentials are gone (lost with the old disk)"
+        note "deleting and recreating it"
+        cloudflared tunnel delete -f "$CF_TUNNEL" 2>&1 | tail -1
+        CF_ID=""
+    fi
+    if [ -z "${CF_ID:-}" ]; then
+        cloudflared tunnel create "$CF_TUNNEL" 2>&1 | tail -1
+        CF_ID=$(cloudflared tunnel list 2>/dev/null | awk -v n="$CF_TUNNEL" '$2==n {print $1}')
+    fi
+
     if [ -n "${CF_ID:-}" ]; then
         sudo mkdir -p /etc/cloudflared
-        sudo cp "$HOME/.cloudflared/$CF_ID.json" /etc/cloudflared/ 2>/dev/null || true
+        if [ -f "$HOME/.cloudflared/$CF_ID.json" ]; then
+            sudo cp "$HOME/.cloudflared/$CF_ID.json" /etc/cloudflared/
+        fi
         sudo chmod 600 /etc/cloudflared/*.json 2>/dev/null || true
+        if [ ! -f "/etc/cloudflared/$CF_ID.json" ]; then
+            warn "no credentials for tunnel $CF_ID — the connector cannot authenticate"
+        fi
         sed -e "s#TUNNEL_ID#$CF_ID#g" -e "s#cam\.[^ ]*\.shop#$CF_HOST#" \
             "$HERE/cloudflared-config.yml" | sudo tee /etc/cloudflared/config.yml >/dev/null
         if sudo cloudflared --config /etc/cloudflared/config.yml tunnel ingress validate >/dev/null 2>&1; then
-            # DNS first: a connector with no route serves nothing.
-            cloudflared tunnel route dns "$CF_TUNNEL" "$CF_HOST" 2>&1 | tail -1
+            # DNS first: a connector with no route serves nothing. --overwrite-dns
+            # because after a recreate the CNAME still points at the old tunnel
+            # id, and without it cloudflared refuses to touch the existing record.
+            cloudflared tunnel route dns --overwrite-dns "$CF_TUNNEL" "$CF_HOST" 2>&1 | tail -1
             systemctl list-unit-files 2>/dev/null | grep -q '^cloudflared\.service' \
                 || sudo cloudflared --config /etc/cloudflared/config.yml service install >/dev/null 2>&1
             sudo systemctl enable --now cloudflared >/dev/null 2>&1
