@@ -30,7 +30,10 @@ sudo systemctl daemon-reload
 
 # 4) Camera: this repo does NOT manage the camera. The Pi already has
 #    go2rtc.service + tailscale-funnel.service. Just make sure they're enabled.
-for SVC in go2rtc.service tailscale-funnel.service; do
+# cloudflared, not tailscale-funnel: the Funnel was the WebRTC-era path and is
+# gone. Warning about a unit that is meant to be absent trains people to ignore
+# the warnings that matter.
+for SVC in go2rtc.service cloudflared.service; do
     if systemctl cat "$SVC" >/dev/null 2>&1; then
         sudo systemctl enable "$SVC" >/dev/null 2>&1 || true
         echo "$SVC: enabled for boot"
